@@ -4,7 +4,14 @@ black/frozen defects."""
 import json
 
 from conftest import fixture
-from shorts.signals.video import detect_defects, detect_faces, detect_scenes, motion_curve
+from shorts.signals.video import (
+    _pick_dominant,
+    detect_defects,
+    detect_faces,
+    detect_scenes,
+    motion_curve,
+)
+from shorts.types import Box
 
 
 def _truth() -> dict:
@@ -106,6 +113,73 @@ def test_detect_faces_screenshare_no_crash():
     frames = detect_faces(fixture("real_screenshare.mp4"), fps=1.0)
     assert len(frames) > 0
     assert any(f.dominant is None for f in frames)
+
+
+def test_detect_faces_screenshare_dominant_gated_out():
+    """Regression for the two-tier confidence gate (DOMINANT_MIN_CONF=0.5):
+    BlazeFace at detection threshold 0.2 reports a phantom box in 52/75
+    (69.3%) of real_screenshare.mp4's sampled frames, but every single one
+    of those phantom boxes measures below 0.5 confidence (0/52 clear it).
+    Gating `dominant` at 0.5 means none of those phantoms can ever become
+    dominant. Measured after the fix: dominant is None in 75/75 (100%)
+    sampled frames -- floor set to >=95% for a small margin."""
+    frames = detect_faces(fixture("real_screenshare.mp4"), fps=1.0)
+    none_rows = sum(1 for f in frames if f.dominant is None)
+    assert none_rows / len(frames) >= 0.95
+
+
+def test_pick_dominant_largest_wins_with_no_prev():
+    """No sticky track yet: pick the largest-area box among candidates
+    clearing DOMINANT_MIN_CONF."""
+    boxes = [
+        Box(x=0.0, y=0.0, w=0.1, h=0.1, conf=0.9),
+        Box(x=0.5, y=0.5, w=0.3, h=0.3, conf=0.9),
+    ]
+    assert _pick_dominant(boxes, None) == 1
+
+
+def test_pick_dominant_sticky_keeps_previous_over_larger_box():
+    """A box overlapping the previous dominant by IoU>0.3 wins even when a
+    non-overlapping box elsewhere in frame is larger and higher-confidence
+    -- this is the whole point of the sticky rule (stop flicker)."""
+    prev = Box(x=0.1, y=0.1, w=0.2, h=0.2, conf=0.9)
+    boxes = [
+        Box(x=0.1, y=0.1, w=0.2, h=0.2, conf=0.9),  # same spot as prev
+        Box(x=0.6, y=0.6, w=0.3, h=0.3, conf=0.95),  # larger, elsewhere
+    ]
+    assert _pick_dominant(boxes, prev) == 0
+
+
+def test_pick_dominant_track_dies_on_low_confidence_overlap():
+    """A box overlapping the previous dominant's exact location, but below
+    DOMINANT_MIN_CONF, must NOT keep the track alive -- low-conf boxes are
+    never candidates, sticky or otherwise."""
+    prev = Box(x=0.1, y=0.1, w=0.2, h=0.2, conf=0.9)
+    boxes = [Box(x=0.1, y=0.1, w=0.2, h=0.2, conf=0.3)]
+    assert _pick_dominant(boxes, prev) is None
+
+
+def test_pick_dominant_reverts_to_largest_when_tracked_face_disappears():
+    """No current box overlaps the previous dominant (it left frame) --
+    fall back to the default largest-high-confidence-box rule instead of
+    sticking to nothing."""
+    prev = Box(x=0.0, y=0.0, w=0.1, h=0.1, conf=0.9)
+    boxes = [
+        Box(x=0.5, y=0.5, w=0.1, h=0.1, conf=0.9),
+        Box(x=0.7, y=0.7, w=0.3, h=0.3, conf=0.9),
+    ]
+    assert _pick_dominant(boxes, prev) == 1
+
+
+def test_pick_dominant_sticky_uses_best_iou_not_first_match():
+    """When multiple candidates clear the IoU>0.3 sticky threshold, pick
+    the *best*-overlapping one, not just the first one found in box order."""
+    prev = Box(x=0.1, y=0.1, w=0.2, h=0.2, conf=0.9)
+    boxes = [
+        Box(x=0.15, y=0.1, w=0.2, h=0.2, conf=0.9),  # IoU ~0.6 with prev, listed first
+        Box(x=0.1, y=0.1, w=0.2, h=0.2, conf=0.9),  # IoU 1.0 with prev, listed second
+    ]
+    assert _pick_dominant(boxes, prev) == 1
 
 
 def test_motion_curve_hop_and_shape():

@@ -30,6 +30,18 @@ _MODEL_PATH = Path(__file__).resolve().parents[3] / "models" / "blaze_face_short
 # lower bar doesn't cost us clean single-face accuracy.
 _MIN_FACE_CONFIDENCE = 0.2
 
+# Two-tier gate: detection stays at _MIN_FACE_CONFIDENCE (0.2) so weak-but-real
+# faces stay in `boxes` -- the podcast fixture's partially-turned second
+# speaker is 25.3% detected at 0.2 vs 0% at 0.5. But `dominant` (the box
+# downstream crop logic center-crops around) is only chosen from boxes
+# clearing this higher bar: at 0.2, real_screenshare.mp4 (no camera face at
+# all) reports a phantom low-confidence box in 69% of sampled frames, and
+# every single one of those measured below 0.5 (0/52 boxes clear it) --
+# gating dominant at 0.5 kills the phantom without touching the podcast's
+# weak-but-real second-face detection in `boxes`. real_talking_head.mp4's
+# genuine face is 100% >= 0.5, so the gate costs nothing there either.
+DOMINANT_MIN_CONF = 0.5
+
 _FACE_DETECTOR = None
 
 
@@ -63,12 +75,40 @@ def _iou(a: Box, b: Box) -> float:
     return inter / union if union > 0.0 else 0.0
 
 
+def _pick_dominant(boxes: list[Box], prev: Box | None) -> int | None:
+    """Pick the dominant box index for one sample: the largest-area box
+    among those clearing DOMINANT_MIN_CONF, except sticky -- stays on
+    whichever high-confidence candidate best overlaps (highest IoU) the
+    previous sample's dominant box, if that overlap exceeds 0.3. Returns
+    None if no box clears DOMINANT_MIN_CONF.
+
+    Low-confidence boxes are never candidates, in sticky matching or
+    otherwise -- a track can only be kept alive by a box that itself clears
+    the bar, so it dies (falls back to None or the next strong box) the
+    moment the tracked face's confidence drops below the gate, rather than
+    drifting onto a phantom low-confidence box."""
+    candidates = [i for i, b in enumerate(boxes) if b.conf >= DOMINANT_MIN_CONF]
+    if not candidates:
+        return None
+
+    dominant_i = max(candidates, key=lambda i: boxes[i].w * boxes[i].h)
+
+    if prev is not None:
+        overlapping = [i for i in candidates if _iou(boxes[i], prev) > 0.3]
+        if overlapping:
+            dominant_i = max(overlapping, key=lambda i: _iou(boxes[i], prev))
+
+    return dominant_i
+
+
 def detect_faces(video: Path, fps: float = 1.0) -> list[FaceFrame]:
     """Per-sample face boxes at `fps` samples/sec (normalized 0..1 box
-    coords). `dominant` picks the largest box each sample, except it stays
-    on whatever box overlaps the previous dominant by IoU>0.3 -- this keeps
-    the chosen face stable frame-to-frame instead of flickering between two
-    similar-sized boxes."""
+    coords), detected at _MIN_FACE_CONFIDENCE (0.2) so weak-but-real faces
+    show up in `boxes`. `dominant` is gated at the higher DOMINANT_MIN_CONF
+    (0.5, see comment there) and picked by `_pick_dominant`: largest
+    high-confidence box each sample, sticky on the previous dominant's best
+    IoU match (>0.3) to keep the chosen face stable frame-to-frame instead
+    of flickering between two similar-sized boxes."""
     detector = _face_detector()
     cap = cv2.VideoCapture(str(video))
     try:
@@ -110,17 +150,9 @@ def detect_faces(video: Path, fps: float = 1.0) -> list[FaceFrame]:
                 prev_dominant_box = None
                 continue
 
-            dominant_i = max(range(len(boxes)), key=lambda i: boxes[i].w * boxes[i].h)
-            if prev_dominant_box is not None:
-                sticky_i = next(
-                    (i for i, b in enumerate(boxes) if _iou(b, prev_dominant_box) > 0.3),
-                    None,
-                )
-                if sticky_i is not None:
-                    dominant_i = sticky_i
-
+            dominant_i = _pick_dominant(boxes, prev_dominant_box)
             frames.append(FaceFrame(t=t, boxes=boxes, dominant=dominant_i))
-            prev_dominant_box = boxes[dominant_i]
+            prev_dominant_box = boxes[dominant_i] if dominant_i is not None else None
 
         return frames
     finally:
@@ -166,6 +198,11 @@ _FREEZE_START_RE = re.compile(r"lavfi\.freezedetect\.freeze_start:\s*([\d.]+)")
 _FREEZE_END_RE = re.compile(r"lavfi\.freezedetect\.freeze_end:\s*([\d.]+)")
 
 
+# ponytail: this is a 3rd full decode pass over the video -- detect_scenes
+# (PySceneDetect) and detect_faces/motion_curve (OpenCV) each independently
+# decode it too, so build_signal_index does 3+ full passes per video. Fine
+# at current fixture lengths (75-90s); merge into one decode loop if
+# real-length source video makes this a bottleneck.
 def detect_defects(video: Path) -> tuple[list[Span], list[Span]]:
     """Black and frozen-frame spans, parsed off ffmpeg blackdetect/
     freezedetect stderr (both filters log to stderr on success -- there is
@@ -186,6 +223,9 @@ def detect_defects(video: Path) -> tuple[list[Span], list[Span]]:
 
     starts = [float(t) for t in _FREEZE_START_RE.findall(stderr)]
     ends = [float(t) for t in _FREEZE_END_RE.findall(stderr)]
+    # ponytail: zip() silently drops a trailing unmatched freeze_start (video
+    # ends while still frozen, so no freeze_end is ever logged). Add a
+    # dangling-freeze-to-EOF case if that turns out to matter for real input.
     frozen = [Span(t0=t0, t1=t1) for t0, t1 in zip(starts, ends)]
 
     return black, frozen
