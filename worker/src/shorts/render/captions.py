@@ -1,14 +1,33 @@
-"""Convert word-level transcript timing into a basic ASS subtitle track.
+"""Word-level transcript timing -> karaoke ASS subtitle track.
 
-No karaoke/word-highlight timing yet -- each caption is a fixed-size chunk
-of words shown for its span. Upgraded in a later task.
+Words are grouped 3-5 per Dialogue line (breaking early at punctuation or a
+>1.2s gap to the next word), each word gets a \\kf<centiseconds> karaoke
+fill tag, and the caller picks one of three preset visual styles (s1/s2/s3).
 """
 
 from shorts.types import Word
 
-# ponytail: crude fixed-size chunking, replace with a smarter line-breaker
-# once caption styling is a real task.
-_WORDS_PER_CAPTION = 6
+_MIN_GROUP = 3
+_MAX_GROUP = 5
+_GAP_BREAK_S = 1.2
+_SAFE_MARGIN_V_FRAC = 0.20  # 20% safe margin off the bottom (platform UI overlap)
+_SAFE_MARGIN_H_FRAC = 0.08
+
+# Three preset "V4+ Styles" karaoke looks, selected by name via `style`.
+# libass \kf semantics: the already-spoken portion of a word draws in
+# PrimaryColour, the not-yet-spoken portion in SecondaryColour -- so
+# "primary" below is each preset's highlight/sweep colour and "secondary"
+# is its base (unspoken) text colour. Colours are ASS &HAABBGGRR.
+_PRESETS = {
+    "s1": {"fontname": "Inter", "primary": "&H0000FFFF", "secondary": "&H00FFFFFF", "outline": 3},
+    "s2": {"fontname": "Noto Sans", "primary": "&H0000FF00", "secondary": "&H00FFFFFF", "outline": 3},
+    "s3": {"fontname": "Inter", "primary": "&H00FF66FF", "secondary": "&H00CCCCCC", "outline": 4},
+}
+_OUTLINE_COLOUR = "&H00000000"
+_BACK_COLOUR = "&H80000000"
+_BOLD = 1
+_SHADOW = 0
+_ALIGNMENT = 2  # bottom-center
 
 
 def _ass_time(t: float) -> str:
@@ -20,17 +39,67 @@ def _ass_time(t: float) -> str:
     s, cs = divmod(rem, 100)
     return f"{h:d}:{m:02d}:{s:02d}.{cs:02d}"
 
-
 def _escape(text: str) -> str:
     # ASS uses {} for override tags and \N for line breaks; keep it simple.
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
+def _ends_with_punctuation(text: str) -> bool:
+    return text.rstrip()[-1:] in ".,!?;:"
+
+
+def _group_words(words: list[Word]) -> list[list[Word]]:
+    """Chunk words into Dialogue-line groups of 3-5, breaking early (once at
+    least 3 words are in the current group) at a punctuation-ending word or
+    a >1.2s gap to the next word; forced break once a group hits 5 words.
+    A trailing group of fewer than 3 words is allowed (nothing left to add
+    to it)."""
+    groups: list[list[Word]] = []
+    current: list[Word] = []
+    for i, w in enumerate(words):
+        current.append(w)
+        if len(current) >= _MAX_GROUP:
+            groups.append(current)
+            current = []
+            continue
+        if len(current) >= _MIN_GROUP:
+            next_word = words[i + 1] if i + 1 < len(words) else None
+            gap = (next_word.t0 - w.t1) if next_word else 0.0
+            if _ends_with_punctuation(w.text) or gap > _GAP_BREAK_S:
+                groups.append(current)
+                current = []
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _karaoke_text(group: list[Word]) -> str:
+    """Build the \\kf-tagged text for one Dialogue line. Each word's
+    highlight duration folds in the gap to the *next* word in the group
+    (rather than emitting a separate unhighlighted span for the gap), so
+    the per-word \\kf durations always sum exactly to the line's
+    (End - Start) -- the last word in the group just uses its own
+    utterance duration, with no following word to fold into."""
+    parts = []
+    for i, w in enumerate(group):
+        if i + 1 < len(group):
+            duration = group[i + 1].t0 - w.t0
+        else:
+            duration = w.t1 - w.t0
+        centis = max(round(duration * 100), 0)
+        parts.append(f"{{\\kf{centis}}}{_escape(w.text)}")
+    return " ".join(parts)
+
+
 def words_to_ass(words: list[Word], style: str, resolution: tuple[int, int]) -> str:
-    """Build ASS subtitle content: one basic bottom-centered style, captions
-    chunked into fixed-size groups of words."""
+    """Build ASS subtitle content for `style` (one of s1/s2/s3): words
+    grouped 3-5 per Dialogue line with per-word \\kf karaoke timing,
+    bottom-center with a 20% vertical / 8% horizontal safe margin."""
+    preset = _PRESETS[style]
     width, height = resolution
-    font_size = max(int(height * 0.045), 24)
+    font_size = max(round(height * 0.045), 24)
+    margin_v = round(height * _SAFE_MARGIN_V_FRAC)
+    margin_h = round(width * _SAFE_MARGIN_H_FRAC)
 
     header = (
         "[Script Info]\n"
@@ -39,21 +108,36 @@ def words_to_ass(words: list[Word], style: str, resolution: tuple[int, int]) -> 
         f"PlayResY: {height}\n"
         "WrapStyle: 0\n\n"
         "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, "
-        "Bold, Outline, Shadow, Alignment, MarginL, MarginR, MarginV\n"
-        f"Style: {style},Arial,{font_size},&H00FFFFFF,&H00000000,&H80000000,1,3,0,2,60,60,80\n\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+        "BackColour, Bold, Outline, Shadow, Alignment, MarginL, MarginR, MarginV\n"
+        f"Style: {style},{preset['fontname']},{font_size},{preset['primary']},"
+        f"{preset['secondary']},{_OUTLINE_COLOUR},{_BACK_COLOUR},{_BOLD},{preset['outline']},"
+        f"{_SHADOW},{_ALIGNMENT},{margin_h},{margin_h},{margin_v}\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
     lines = []
-    for i in range(0, len(words), _WORDS_PER_CAPTION):
-        chunk = words[i : i + _WORDS_PER_CAPTION]
-        if not chunk:
-            continue
-        text = _escape(" ".join(w.text for w in chunk))
-        start = _ass_time(chunk[0].t0)
-        end = _ass_time(chunk[-1].t1)
+    for group in _group_words(words):
+        start = _ass_time(group[0].t0)
+        end = _ass_time(group[-1].t1)
+        text = _karaoke_text(group)
         lines.append(f"Dialogue: 0,{start},{end},{style},,0,0,0,,{text}")
 
     return header + "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    # ponytail: quick manual self-check, not a substitute for
+    # tests/test_captions.py -- run `python -m shorts.render.captions`.
+    demo_words = [
+        Word(text="Hello,", t0=0.0, t1=0.3, conf=0.9),
+        Word(text="world", t0=0.35, t1=0.6, conf=0.9),
+        Word(text="this", t0=0.6, t1=0.8, conf=0.9),
+        Word(text="is", t0=0.8, t1=0.95, conf=0.9),
+    ]
+    out = words_to_ass(demo_words, "s1", (1080, 1920))
+    assert "\\kf" in out
+    assert "Style: s1,Inter" in out
+    assert out.count("Dialogue:") == 1
+    print("captions self-check OK")

@@ -9,14 +9,15 @@ import json
 from pathlib import Path
 
 from shorts.agents.scout import MIN_LEN_S, heuristic_candidates
-from shorts.render.captions import words_to_ass
 from shorts.render.renderer import render_clip
 from shorts.signals.index import build_signal_index, save as save_signal_index
 from shorts.types import Candidate, ClipResult, Cut, SignalIndex, SourceMedia, Span
 from shorts.ffmpeg import extract_wav, probe
 
-RESOLUTION = (1080, 1920)
 MAX_CLIPS = 4
+# ponytail: hooks/style selection are later tasks -- one fixed caption
+# preset for every clip until hook-generation/scoring picks per-clip style.
+DEFAULT_STYLE = "s1"
 
 
 def _window_around(mid: float, span: float, duration: float) -> tuple[float, float]:
@@ -122,12 +123,11 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
     run_entries = []
     for i, candidate in enumerate(top, start=1):
         cut = Cut(t0=candidate.t0, t1=candidate.t1)
-        clip_words = [w for w in words if cut.t0 <= w.t0 < cut.t1]
+        mp4, thumb = render_clip(
+            source, cut, index, None, DEFAULT_STYLE, out_dir / f"clip_{i:03d}"
+        )
 
-        ass = words_to_ass(clip_words, style="Default", resolution=RESOLUTION)
-        mp4 = render_clip(source, cut, ass, out_dir / f"clip_{i:03d}.mp4")
-
-        result = ClipResult(mp4=mp4, thumb=None, cut=cut, score=None, hook=None, qa=None)
+        result = ClipResult(mp4=mp4, thumb=thumb, cut=cut, score=None, hook=None, qa=None)
         results.append(result)
         run_entries.append(
             {
