@@ -1,0 +1,24 @@
+{
+  "real_podcast_2p.mp4": {
+    "duration_s": 75.0,
+    "license": "CC BY 4.0",
+    "sha256": "064f445c4c7fcee03c5a77e82bbcb3733bb9aa9b97b32bdb2b73375a8a698273",
+    "url": "https://commons.wikimedia.org/wiki/File:Interview_with_Jimmy_Wales_at_Wikimania_2025_Nairobi.webm"
+  },
+  "real_screenshare.mp4": {
+    "duration_s": 75.0,
+    "license": "CC BY 3.0 Unported",
+    "sha256": "92532b4d416649b455aa615d261959c2cff52d3fb1d05b25320b2b435910adb2",
+    "url": "https://commons.wikimedia.org/wiki/File:Screencast_demo_of_Camstudio_and_Firefogg.ogv"
+  },
+  "real_talking_head.mp4": {
+    "duration_s": 75.008,
+    "license": "CC BY 3.0 Unported",
+    "sha256": "f96c3e04b436191b469fcf2298e3a7094dac3c8bfb975f342097b8513293fc0b",
+    "url": "https://commons.wikimedia.org/wiki/File:Ronald_Wright,_The_Green_Interview.webm"
+  },
+  "synth_av.mp4": {
+    "duration_s": 90.0,
+    "sha256": "d2d75cbbc69233b8af5e0ca42edea0191b593ad8a50800f720a6de069e043d19"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "duration_s": 90.0,
+  "video": {
+    "width": 480,
+    "height": 270,
+    "fps": 25
+  },
+  "color_cuts_s": [
+    20.0,
+    40.0,
+    70.0
+  ],
+  "black_segment": {
+    "t0": 75.0,
+    "t1": 76.0
+  },
+  "silence_gap": {
+    "t0": 30.0,
+    "t1": 32.0
+  },
+  "laughter_burst": {
+    "t0": 45.0,
+    "t1": 47.0,
+    "label": "laughter",
+    "source_url": "https://upload.wikimedia.org/wikipedia/commons/c/c6/Laughter.ogg",
+    "source_license": "Public domain (pdsounds.org, dedicated by author ezwa)"
+  },
+  "sine_burst": {
+    "t0": 60.0,
+    "t1": 62.0,
+    "frequency_hz": 880,
+    "gain_db_over_base": 12.0
+  },
+  "speech_base_mean_volume_db": -19.7,
+  "speech_chunks": [
+    {
+      "t0": 0.0,
+      "t1": 30.0,
+      "text": "This is segment one of the synthetic audio and video fixture built for the shorts factory worker pipeline test suite. Continuous speech plays here to give the voice activity detector and the word aligner a long clean stretch of real English audio before the first deliberate quiet gap arrives a few seconds from now."
+    },
+    {
+      "t0": 32.0,
+      "t1": 45.0,
+      "text": "Segment two begins right after a two second silence and keeps talking until an audience laughs on the recording just ahead."
+    },
+    {
+      "t0": 47.0,
+      "t1": 60.0,
+      "text": "Segment three follows the laughter and runs until a loud test tone interrupts the speech to mark an energy peak."
+    },
+    {
+      "t0": 62.0,
+      "t1": 90.0,
+      "text": "Segment four is the final and longest stretch of speech in the fixture, running all the way to the end of the ninety second clip. It exists to make sure signal extraction keeps working correctly across a long uninterrupted section of dialogue near the tail of the file."
+    }
+  ]
+}
