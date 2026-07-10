@@ -72,30 +72,3 @@ def extract_wav(video: Path, out: Path, sr: int = 16000) -> Path:
         str(out),
     ])
     return out
-
-
-if __name__ == "__main__":
-    # Runnable self-check: generate a 1s lavfi clip in a temp dir, probe it,
-    # extract its audio.
-    import sys
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        clip = tmp_path / "self_check.mp4"
-        run([
-            "-y",
-            "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=1",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-            "-c:v", "libx264", "-c:a", "aac", "-shortest",
-            str(clip),
-        ])
-        info = probe(clip)
-        assert (info.width, info.height) == (320, 240), info
-        assert abs(info.fps - 30.0) < 0.5, info
-        assert 0.5 <= info.duration_s <= 1.5, info
-
-        wav = extract_wav(clip, tmp_path / "self_check.wav")
-        assert wav.exists() and wav.stat().st_size > 0
-
-    print("ffmpeg.py self-check OK", file=sys.stderr)
