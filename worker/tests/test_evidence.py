@@ -6,13 +6,15 @@ peak, wrong sigma, out-of-window t, unknown kind, fabricated quote), each
 asserted to yield exactly one Violation with the right reason substring.
 """
 
+import dataclasses
+
 import pytest
 
 from conftest import fixture
 from shorts.agents.evidence import Violation, validate_claims
 from shorts.ffmpeg import extract_wav, probe
 from shorts.signals.index import build_signal_index
-from shorts.types import Claim, SourceMedia, Span
+from shorts.types import AudioEvent, Claim, SourceMedia, Span
 
 
 @pytest.fixture(scope="module")
@@ -75,13 +77,27 @@ def test_fabricated_laughter_is_a_violation(idx, window):
     assert "no laughter event" in violations[0].reason
 
 
+def test_valid_applause_claim_passes(idx, window):
+    idx_with_applause = dataclasses.replace(
+        idx, events=idx.events + [AudioEvent(label="applause", t0=50.0, t1=51.5, conf=0.8)]
+    )
+    claims = [Claim(kind="applause", t=50.5)]
+    assert validate_claims(claims, idx_with_applause, window) == []
+
+
+def test_fabricated_applause_is_a_violation(idx, window):
+    t = _time_with_no_event_within(idx, "applause", tol=1.0)
+    claims = [Claim(kind="applause", t=t)]
+    violations = validate_claims(claims, idx, window)
+    assert len(violations) == 1
+    assert "no applause event" in violations[0].reason
+
+
 def test_valid_rate_surge_claim_passes(idx, window):
-    if not idx.surges:
-        pytest.skip("fixture has no rate surges to test against")
-    surge = idx.surges[0]
-    mid = (surge.t0 + surge.t1) / 2
-    claims = [Claim(kind="rate_surge", t=mid)]
-    assert validate_claims(claims, idx, window) == []
+    # Synthetic surge injected because the fixture audio has none; gate logic is index-agnostic.
+    idx_with_surge = dataclasses.replace(idx, surges=[Span(35.0, 41.0)])
+    claims = [Claim(kind="rate_surge", t=38.0)]
+    assert validate_claims(claims, idx_with_surge, window) == []
 
 
 def test_fabricated_rate_surge_is_a_violation(idx, window):

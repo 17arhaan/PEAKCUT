@@ -68,6 +68,36 @@ def test_retries_once_on_invalid_json_then_succeeds(tmp_path, monkeypatch):
     assert all(r["tokens_in"] == 10 and r["tokens_out"] == 20 for r in records)
 
 
+def test_retry_reprompt_includes_validation_error_and_correct_structure(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHORTS_LLM", "live")
+    log = AgentLog(tmp_path / "log.jsonl")
+    call_kwargs = []
+    responses = iter([_response("not json at all"), _response('{"evidence": []}')])
+
+    def capture_create(**kw):
+        call_kwargs.append(kw)
+        return next(responses)
+
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=capture_create))
+    with patch("shorts.agents.llm.anthropic.Anthropic", return_value=mock_client):
+        result = complete_json("prompt", SCHEMA, "scout", log)
+    assert result == {"evidence": []}
+
+    # Verify second call's kwargs
+    assert len(call_kwargs) == 2
+    second_call_kw = call_kwargs[1]
+    # Check messages structure
+    assert "messages" in second_call_kw
+    assert isinstance(second_call_kw["messages"], list)
+    assert len(second_call_kw["messages"]) == 1
+    assert second_call_kw["messages"][0]["role"] == "user"
+    assert isinstance(second_call_kw["messages"][0]["content"], str)
+    # Check that re-prompt includes the validation error text
+    assert "not valid JSON" in second_call_kw["messages"][0]["content"]
+    # Check max_tokens is present and correct
+    assert second_call_kw.get("max_tokens") == 4096
+
+
 def test_retries_once_on_schema_mismatch_then_succeeds(tmp_path, monkeypatch):
     monkeypatch.setenv("SHORTS_LLM", "live")
     log = AgentLog(tmp_path / "log.jsonl")
