@@ -1,0 +1,54 @@
+[project]
+name = "shorts"
+version = "0.1.0"
+description = "Shorts Factory worker pipeline"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.116.0",
+    "faster-whisper>=1.2.1",
+    "librosa>=0.10,<0.11",
+    "mediapipe>=0.10.35",
+    "modal>=1.5.1",
+    "opencv-contrib-python>=5.0.0.93",
+    "panns-inference>=0.1.1",
+    "pytest>=9.1.1",
+    "scenedetect>=0.7",
+    "silero-vad>=6.2.1",
+    # torch/torchaudio MUST be pinned to the exact same version. torchaudio's
+    # release cadence has fallen behind torch's (latest torchaudio on PyPI is
+    # 2.11.0 while torch has moved on to 2.13.0) and torchaudio does not
+    # declare a "torch==" runtime dependency in its own metadata, so the
+    # resolver will happily pick torch 2.13.0 + torchaudio 2.11.0 -- a pair
+    # that is not guaranteed ABI/API compatible (forced_align/MMS_FA is what
+    # align.py needs in T5). Pin both to the last version torchaudio actually
+    # shipped for.
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "yt-dlp>=2026.7.4",
+]
+
+[project.scripts]
+shorts = "shorts.cli:main"
+
+# opencv three-way conflict: scenedetect hard-depends on "opencv-python" and
+# mediapipe hard-depends on "opencv-contrib-python" -- both ship a `cv2`
+# package at the same site-packages path, so installing both distributions
+# is an unreliable footgun (last-installed wins, file-level clobber, order
+# not guaranteed stable across platforms). The plan's global constraints
+# called for opencv-python-headless, but that is a THIRD distribution
+# providing the same `cv2` path and does not resolve the conflict with
+# mediapipe's hard opencv-contrib-python dependency either -- so the minimal
+# compromise is: opencv-contrib-python is a strict superset of opencv-python
+# (same cv2 API plus contrib modules), so we keep it as the single cv2
+# provider and override away the redundant opencv-python pulled in
+# transitively by scenedetect. The PEP 508 marker below is always-false, so
+# uv treats scenedetect's requirement as satisfied without installing the
+# second distribution. Consequence for T18 (Modal image): opencv-contrib-python
+# is a GUI build and needs `libgl1`/`libglib2.0-0` present in the container
+# (apt install), unlike opencv-python-headless -- note this in modal_app.py.
+[tool.uv]
+override-dependencies = ["opencv-python; sys_platform == 'never_actually_matches'"]
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"

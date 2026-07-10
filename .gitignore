@@ -1,0 +1,10 @@
+.superpowers/
+.DS_Store
+
+# Python / uv
+worker/.venv/
+worker/__pycache__/
+worker/**/__pycache__/
+worker/.pytest_cache/
+worker/**/*.pyc
+worker/src/*.egg-info/
