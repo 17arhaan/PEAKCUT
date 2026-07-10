@@ -8,6 +8,7 @@ from pathlib import Path
 
 from shorts.signals.audio import energy, fillers, run_vad
 from shorts.signals.transcript import transcribe
+from shorts.signals.video import detect_defects, detect_faces, detect_scenes, motion_curve
 from shorts.types import (
     AudioEvent,
     Box,
@@ -31,6 +32,7 @@ def build_signal_index(media: SourceMedia, workdir: Path) -> SignalIndex:
     language, words = transcribe(media.wav16k)
     speech, silences = run_vad(media.wav16k)
     energy_curve, peaks = energy(media.wav16k)
+    defects_black, defects_frozen = detect_defects(media.video)
 
     empty_curve = Curve(hop_s=0.0, values=[])
 
@@ -49,11 +51,11 @@ def build_signal_index(media: SourceMedia, workdir: Path) -> SignalIndex:
         surges=[],
         monotone=[],
         events=[],
-        scenes=[],
-        faces=[],
-        motion=empty_curve,
-        defects_black=[],
-        defects_frozen=[],
+        scenes=detect_scenes(media.video),
+        faces=detect_faces(media.video),
+        motion=motion_curve(media.video),
+        defects_black=defects_black,
+        defects_frozen=defects_frozen,
     )
 
 

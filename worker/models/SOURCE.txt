@@ -1,0 +1,6 @@
+blaze_face_short_range.tflite
+
+Source: https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+Fetched by: scripts/fetch_face_model.py
+License: Apache License 2.0 (Google MediaPipe model zoo)
+https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector
