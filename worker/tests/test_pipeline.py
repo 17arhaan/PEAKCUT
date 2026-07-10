@@ -1,0 +1,90 @@
+"""Unit tests for pipeline._fallback_candidates: hand-built tiny SignalIndex
+objects, no real media/rendering -- exercises the speech-anchored window
+placement and its two degenerate cases directly."""
+
+from shorts.pipeline import _fallback_candidates
+from shorts.types import Curve, MediaInfo, SignalIndex, Span
+
+
+def _mk_index(**overrides) -> SignalIndex:
+    defaults = dict(
+        version=1,
+        media=MediaInfo(duration_s=60.0, fps=30.0, width=1920, height=1080),
+        language="en",
+        words=[],
+        fillers=[],
+        speech=[],
+        silences=[],
+        energy=Curve(hop_s=0.05, values=[]),
+        peaks=[],
+        rate=Curve(hop_s=1.0, values=[]),
+        pitch=Curve(hop_s=1.0, values=[]),
+        surges=[],
+        monotone=[],
+        events=[],
+        scenes=[],
+        faces=[],
+        motion=Curve(hop_s=0.5, values=[]),
+        defects_black=[],
+        defects_frozen=[],
+    )
+    defaults.update(overrides)
+    return SignalIndex(**defaults)
+
+
+def test_fallback_windows_anchor_to_speech_spans():
+    """Speech only occupies two short spans out of a 200s video (mostly
+    silence) -- fallback windows should land inside/around the speech, not
+    spread evenly across the silent majority of the timeline."""
+    idx = _mk_index(
+        media=MediaInfo(duration_s=200.0, fps=30.0, width=1920, height=1080),
+        speech=[Span(t0=10.0, t1=20.0), Span(t0=150.0, t1=160.0)],
+    )
+
+    candidates = _fallback_candidates(idx, 2)
+
+    assert len(candidates) == 2
+    # each candidate's window should overlap one of the two speech spans,
+    # not fall in the silent gap between them.
+    for c in candidates:
+        overlaps_speech = any(c.t0 < s.t1 and c.t1 > s.t0 for s in idx.speech)
+        assert overlaps_speech
+        assert c.source == "fallback"
+        assert c.evidence == []
+
+
+def test_fallback_falls_back_to_duration_spacing_when_no_speech():
+    """No speech at all (e.g. a silent clip, or a hand-built index missing
+    VAD output) -- nothing to anchor to, so fallback should degrade to the
+    old evenly-spaced-over-duration behavior instead of crashing/collapsing."""
+    idx = _mk_index(media=MediaInfo(duration_s=100.0, fps=30.0, width=1920, height=1080), speech=[])
+
+    candidates = _fallback_candidates(idx, 4)
+
+    assert len(candidates) == 4
+    # roughly evenly spread across the duration
+    starts = sorted(c.t0 for c in candidates)
+    assert starts[0] < 30.0
+    assert starts[-1] > 60.0
+
+
+def test_fallback_drops_near_duplicate_windows_on_very_short_video():
+    """duration < n*10s: evenly-spaced target midpoints are closer together
+    than the minimum window length, so once each window is clamped/shifted
+    to fit inside the video, several would be near-identical -- those
+    extras should be dropped rather than emitted as duplicate clips."""
+    idx = _mk_index(
+        media=MediaInfo(duration_s=15.0, fps=30.0, width=1920, height=1080),
+        speech=[Span(t0=0.0, t1=15.0)],
+    )
+
+    candidates = _fallback_candidates(idx, 4)
+
+    assert 1 <= len(candidates) < 4
+    # whatever survives must be pairwise non-near-duplicate.
+    for i, a in enumerate(candidates):
+        for b in candidates[i + 1 :]:
+            inter = max(0.0, min(a.t1, b.t1) - max(a.t0, b.t0))
+            union = (a.t1 - a.t0) + (b.t1 - b.t0) - inter
+            iou = inter / union if union > 0 else 0.0
+            assert iou <= 0.5

@@ -7,7 +7,8 @@ justify it (the evidence-gate vocabulary a later Critic task consumes).
 import math
 import statistics
 
-from shorts.types import Candidate, Claim, SignalIndex, Span
+from shorts.signals.index import events_in, peaks_in
+from shorts.types import Candidate, Claim, SignalIndex
 
 MAX_CANDIDATES = 20
 MIN_LEN_S = 10.0
@@ -25,12 +26,6 @@ _LAUGH_TAIL_S = 3.0  # candidate ends this long after the event
 # rule (c): minimum stable-scene length + the pitch-variance percentile bar
 _SCENE_MIN_LEN_S = 20.0
 _PITCH_VARIANCE_PERCENTILE_N = 10  # top decile == quantiles(n=10)'s last cut
-
-
-def _span_distance(span: Span, t: float) -> float:
-    if span.t0 <= t <= span.t1:
-        return 0.0
-    return min(abs(span.t0 - t), abs(span.t1 - t))
 
 
 def _iou(a: Candidate, b: Candidate) -> float:
@@ -71,16 +66,23 @@ def _clamp_windows(t0: float, t1: float, duration: float) -> list[tuple[float, f
 def _rule_energy_rate(idx: SignalIndex) -> list[Candidate]:
     """(a) energy peak AND rate surge within 5s of each other -> candidate
     window +/-20s around the pair (centered on the peak, the sharper of the
-    two signals in time)."""
+    two signals in time). Surges have no query helper (there's no windowed
+    lookup to reuse for "iterate every surge"), so that loop stays raw; the
+    per-surge peak lookup goes through peaks_in, and among peaks in that
+    +/-5s window we pick the one nearest the surge's midpoint rather than
+    the first one found."""
     duration = idx.media.duration_s
     out = []
-    for peak in idx.peaks:
-        surge = next(
-            (s for s in idx.surges if _span_distance(s, peak.t) <= _PEAK_SURGE_PROXIMITY_S),
-            None,
+    for surge in idx.surges:
+        window_peaks = peaks_in(
+            idx,
+            surge.t0 - _PEAK_SURGE_PROXIMITY_S,
+            surge.t1 + _PEAK_SURGE_PROXIMITY_S,
         )
-        if surge is None:
+        if not window_peaks:
             continue
+        surge_mid = (surge.t0 + surge.t1) / 2
+        peak = min(window_peaks, key=lambda p: abs(p.t - surge_mid))
         evidence = [
             Claim(kind="energy_peak", t=peak.t, value=peak.sigma),
             Claim(kind="rate_surge", t=surge.t0),
@@ -100,10 +102,12 @@ def _rule_laughter(idx: SignalIndex) -> list[Candidate]:
     """(b) laughter/applause event with >=8s of speech before it ->
     candidate ending just after the event."""
     duration = idx.media.duration_s
+    events = events_in(idx, 0.0, duration, label="laughter") + events_in(
+        idx, 0.0, duration, label="applause"
+    )
+    events.sort(key=lambda e: e.t0)
     out = []
-    for event in idx.events:
-        if event.label not in ("laughter", "applause"):
-            continue
+    for event in events:
         lead_speech = _speech_seconds_in(idx, event.t0 - _LAUGH_LEADUP_SPEECH_S, event.t0)
         if lead_speech < _LAUGH_LEADUP_SPEECH_S:
             continue
@@ -152,7 +156,14 @@ def _dedupe(candidates: list[Candidate]) -> list[Candidate]:
     """Merge candidates whose windows overlap by IoU>0.5, keeping whichever
     has more evidence (ties keep the one already kept -- deterministic,
     since rules run in a > b > c order and each rule appends in signal
-    order)."""
+    order).
+
+    ponytail: greedy single pass against `kept`, not a transitive
+    clustering -- if A overlaps B and B overlaps C but A doesn't overlap C,
+    all three still collapse into one (whichever of A/B is kept first also
+    absorbs C). Fine for the sparse candidate counts here; revisit with a
+    union-find/interval-merge pass if candidates get dense enough for that
+    non-transitivity to actually bite."""
     kept: list[Candidate] = []
     for c in candidates:
         dup_i = next((i for i, k in enumerate(kept) if _iou(c, k) > 0.5), None)
