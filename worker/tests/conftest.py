@@ -4,7 +4,10 @@ Fixtures themselves are built once by `scripts/make_fixtures.py` and
 committed to `tests/fixtures/`; this module never generates them.
 """
 
+import os
 from pathlib import Path
+
+os.environ.setdefault("SHORTS_WHISPER_MODEL", "tiny")
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
