@@ -10,7 +10,7 @@ from shorts.pipeline import run
 def test_e2e_produces_valid_clip(tmp_path):
     results = run(fixture("real_talking_head.mp4"), tmp_path)
     ok = [r for r in results if r.mp4]
-    assert len(ok) >= 1
+    assert len(ok) >= 2
     info = probe(ok[0].mp4)
     assert (info.width, info.height) == (1080, 1920)
     assert 5 <= info.duration_s <= 65
