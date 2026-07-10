@@ -10,9 +10,9 @@ from pathlib import Path
 
 from shorts.render.captions import words_to_ass
 from shorts.render.renderer import render_clip
-from shorts.signals.transcript import transcribe
-from shorts.types import ClipResult, Cut
-from shorts.ffmpeg import extract_wav
+from shorts.signals.index import build_signal_index, save as save_signal_index
+from shorts.types import ClipResult, Cut, SourceMedia
+from shorts.ffmpeg import extract_wav, probe
 
 RESOLUTION = (1080, 1920)
 # ponytail: crude picker, replaced in T6 -- first 30s of speech, no scoring.
@@ -25,13 +25,16 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     wav = extract_wav(source, out_dir / "audio.wav")
-    _language, words = transcribe(wav)
+    media = SourceMedia(video=source, wav16k=wav, info=probe(source))
+    index = build_signal_index(media, out_dir)
+    save_signal_index(index, out_dir / "signals.json")
 
+    words = index.words
     if not words:
         (out_dir / "run.json").write_text(json.dumps([], indent=2))
         return []
 
-    t0 = words[0].t0
+    t0 = index.speech[0].t0 if index.speech else words[0].t0
     t1 = t0 + CLIP_LEN_S
     cut = Cut(t0=t0, t1=t1)
     clip_words = [w for w in words if t0 <= w.t0 < t1]
