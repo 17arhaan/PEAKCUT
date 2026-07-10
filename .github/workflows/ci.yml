@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "build/**"]
+  pull_request:
+
+jobs:
+  worker-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SHORTS_WHISPER_MODEL: tiny
+      SHORTS_LLM: stub
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps (ffmpeg with libass, espeak-ng)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ffmpeg espeak-ng
+          ffmpeg -hide_banner -filters | grep -q subtitles  # libass sanity
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Sync environment
+        working-directory: worker
+        run: uv sync --frozen
+
+      - name: Doctor
+        working-directory: worker
+        run: uv run shorts doctor
+
+      - name: Tests (stub mode, no API keys)
+        working-directory: worker
+        run: uv run pytest tests/ -v
