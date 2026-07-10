@@ -6,7 +6,9 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from shorts.signals.audio import energy, fillers, run_vad
+from shorts.signals.align import align_words
+from shorts.signals.audio import energy, fillers, prosody, run_vad
+from shorts.signals.audio_events import detect as detect_events
 from shorts.signals.transcript import transcribe
 from shorts.signals.video import detect_defects, detect_faces, detect_scenes, motion_curve
 from shorts.types import (
@@ -26,15 +28,16 @@ SCHEMA_VERSION = 1
 
 
 def build_signal_index(media: SourceMedia, workdir: Path) -> SignalIndex:
-    """Build a SignalIndex from `media`, filling in the signals that exist
-    today (transcript, VAD, RMS energy/peaks, fillers) and leaving the rest
-    as empty lists/curves for later tasks to populate."""
+    """Build a SignalIndex from `media` -- the full signal-extraction layer:
+    transcript (+ forced-alignment error), VAD, RMS energy/peaks, fillers,
+    speaking-rate/pitch prosody (+ surges/monotone spans), PANNs audio
+    events, and the video signals."""
     language, words = transcribe(media.wav16k)
+    words = align_words(media.wav16k, words, language)
     speech, silences = run_vad(media.wav16k)
     energy_curve, peaks = energy(media.wav16k)
+    rate_curve, pitch_curve, surges, monotone = prosody(media.wav16k, words)
     defects_black, defects_frozen = detect_defects(media.video)
-
-    empty_curve = Curve(hop_s=0.0, values=[])
 
     return SignalIndex(
         version=SCHEMA_VERSION,
@@ -46,11 +49,11 @@ def build_signal_index(media: SourceMedia, workdir: Path) -> SignalIndex:
         silences=silences,
         energy=energy_curve,
         peaks=peaks,
-        rate=empty_curve,
-        pitch=empty_curve,
-        surges=[],
-        monotone=[],
-        events=[],
+        rate=rate_curve,
+        pitch=pitch_curve,
+        surges=surges,
+        monotone=monotone,
+        events=detect_events(media.wav16k),
         scenes=detect_scenes(media.video),
         faces=detect_faces(media.video),
         motion=motion_curve(media.video),

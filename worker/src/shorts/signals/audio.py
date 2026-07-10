@@ -154,3 +154,112 @@ def fillers(words: list[Word]) -> list[Span]:
             continue
         i += 1
     return spans
+
+
+def _rate_curve(words: list[Word], duration_s: float, hop_s: float) -> list[float]:
+    """Words-per-second curve: each bucket counts words whose start falls in
+    that hop_s-wide second, divided by hop_s."""
+    n_buckets = max(1, math.ceil(duration_s / hop_s))
+    counts = [0] * n_buckets
+    for w in words:
+        i = int(w.t0 // hop_s)
+        if 0 <= i < n_buckets:
+            counts[i] += 1
+    return [c / hop_s for c in counts]
+
+
+def _pitch_track(
+    y: np.ndarray, sr: int, chunk_s: float = 600.0, overlap_s: float = 5.0
+) -> tuple[np.ndarray, float]:
+    """f0 (NaN where unvoiced) via librosa.pyin, chunked/stitched like
+    _energy_from_array -- pyin is slow, so long audio is bounded to
+    chunk_s-sized windows rather than one huge pass."""
+    duration_s = len(y) / sr
+    bounds = _chunk_bounds(duration_s, chunk_s, overlap_s)
+    hop_length = 512
+    frame_hop_s = hop_length / sr
+    overlap_frames = round(overlap_s / frame_hop_s)
+
+    pieces = []
+    for i, (t0, t1) in enumerate(bounds):
+        chunk = y[round(t0 * sr) : round(t1 * sr)]
+        f0, _voiced_flag, _voiced_prob = librosa.pyin(
+            chunk,
+            fmin=float(librosa.note_to_hz("C2")),
+            fmax=float(librosa.note_to_hz("C7")),
+            sr=sr,
+            hop_length=hop_length,
+        )
+        if i > 0:
+            f0 = f0[overlap_frames:]
+        pieces.append(f0)
+    f0_full = np.concatenate(pieces) if pieces else np.array([], dtype=np.float64)
+    return f0_full, frame_hop_s
+
+
+def _pitch_variance_curve(
+    f0: np.ndarray, frame_hop_s: float, duration_s: float, hop_s: float
+) -> list[float]:
+    """Pitch-variance curve at `hop_s`: variance of voiced f0 samples in each
+    bucket (0.0 if fewer than 2 voiced samples fall in it -- no signal to
+    take a variance over)."""
+    n_buckets = max(1, math.ceil(duration_s / hop_s))
+    values = []
+    for i in range(n_buckets):
+        lo = round(i * hop_s / frame_hop_s)
+        hi = round((i + 1) * hop_s / frame_hop_s)
+        window = f0[lo:hi]
+        voiced = window[~np.isnan(window)]
+        values.append(float(np.var(voiced)) if len(voiced) >= 2 else 0.0)
+    return values
+
+
+def _runs_above(
+    values: list[float], hop_s: float, predicate, min_duration_s: float
+) -> list[Span]:
+    """Spans covering consecutive hop_s buckets satisfying `predicate`, kept
+    only if the run lasts >= min_duration_s."""
+    spans: list[Span] = []
+    n = len(values)
+    i = 0
+    while i < n:
+        if predicate(values[i]):
+            start = i
+            while i < n and predicate(values[i]):
+                i += 1
+            t0, t1 = start * hop_s, i * hop_s
+            if t1 - t0 >= min_duration_s:
+                spans.append(Span(t0=t0, t1=t1))
+        else:
+            i += 1
+    return spans
+
+
+def prosody(wav: Path, words: list[Word]) -> tuple[Curve, Curve, list[Span], list[Span]]:
+    """Speaking-rate and pitch-variance curves (hop 1s) plus the spans they
+    imply: surges (rate > mean+1sigma for >=3s) and monotone stretches
+    (pitch-variance < mean-1sigma for >=10s)."""
+    hop_s = 1.0
+    y, sr = librosa.load(str(wav), sr=16000, mono=True)
+    duration_s = len(y) / sr
+
+    rate_values = _rate_curve(words, duration_s, hop_s)
+    f0, frame_hop_s = _pitch_track(y, sr)
+    pitch_values = _pitch_variance_curve(f0, frame_hop_s, duration_s, hop_s)
+
+    rate_arr = np.array(rate_values)
+    pitch_arr = np.array(pitch_values)
+    r_mean, r_std = float(rate_arr.mean()), float(rate_arr.std())
+    p_mean, p_std = float(pitch_arr.mean()), float(pitch_arr.std())
+
+    surges = _runs_above(rate_values, hop_s, lambda v: v > r_mean + r_std, min_duration_s=3.0)
+    monotone = _runs_above(
+        pitch_values, hop_s, lambda v: v < p_mean - p_std, min_duration_s=10.0
+    )
+
+    return (
+        Curve(hop_s=hop_s, values=rate_values),
+        Curve(hop_s=hop_s, values=pitch_values),
+        surges,
+        monotone,
+    )
