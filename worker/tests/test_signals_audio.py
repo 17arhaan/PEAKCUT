@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 
-from conftest import fixture
+from conftest import approx_spans, fixture
 from shorts.ffmpeg import extract_wav
 from shorts.signals.audio import (
     _chunk_bounds,
@@ -23,22 +23,24 @@ def _truth() -> dict:
 
 
 def test_vad_finds_silence_gap(tmp_path):
-    """golden: VAD must surface a silence covering the synthetic gap. The
+    """golden: VAD must surface a silence covering the acoustic gap. The
     fixture's segment-1 TTS naturally trails into near-silence a bit before
-    its nominal 30.0s boundary (atempo-stretched espeak tail), so the
-    acoustic silence starts a little earlier than the declared t0 -- the
-    trustworthy boundary is t1 (32.0), where segment 2's speech resumes
-    right on time.
+    the nominal 30.0s boundary (atempo-stretched espeak tail); ffmpeg
+    silencedetect measures the true acoustic silence as 29.404762-32.013197s.
+    This test anchors to those measured boundaries, allowing ±0.15s tolerance.
     """
     truth = _truth()["silence_gap"]
     wav = extract_wav(fixture("synth_av.mp4"), tmp_path / "audio.wav")
 
     _speech, silences = run_vad(wav)
 
+    # Measured acoustic silence boundaries (ffmpeg silencedetect)
+    acoustic_silence = (29.404762, 32.013197)
+
     mid = (truth["t0"] + truth["t1"]) / 2
     hit = next((s for s in silences if s.t0 <= mid <= s.t1), None)
     assert hit is not None, f"no detected silence covers {truth}"
-    assert abs(hit.t1 - truth["t1"]) <= 0.15
+    assert approx_spans(hit, acoustic_silence, tol_s=0.15)
 
 
 def test_energy_peak_near_sine_burst(tmp_path):
