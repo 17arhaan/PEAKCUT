@@ -6,6 +6,7 @@ import importlib.metadata
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 # Every heavy dependency added in T1's resolver fight. `doctor` imports each
 # one to prove the environment (venv or Modal image) actually has a working
@@ -79,10 +80,22 @@ def main(argv: list[str] | None = None) -> None:
         help="import all heavy deps and check ffmpeg/ffprobe/espeak-ng on PATH",
     )
 
+    run_parser = subparsers.add_parser(
+        "run", help="run the pipeline on a video, writing clips to -o/--out"
+    )
+    run_parser.add_argument("source", help="path to the source video")
+    run_parser.add_argument("-o", "--out", required=True, help="output directory")
+
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
         sys.exit(doctor())
+    elif args.command == "run":
+        from shorts.pipeline import run as run_pipeline
+
+        results = run_pipeline(Path(args.source), Path(args.out))
+        print(f"wrote {len(results)} clip(s) to {args.out}")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
