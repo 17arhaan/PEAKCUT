@@ -1,13 +1,14 @@
 """Pipeline: video in, up to 4 candidate captioned 9:16 clips out.
 
 Signal extraction (SignalIndex) is real; so is candidate-finding (heuristic
-Scout, T6). Scoring/hooks/QA are still stubs -- each gets a real
-implementation in a later task.
+Scout, T6) and the QA gate (T8). Scoring/hooks are still stubs -- each gets
+a real implementation in a later task.
 """
 
 import json
 from pathlib import Path
 
+from shorts import qa
 from shorts.agents.scout import MIN_LEN_S, heuristic_candidates
 from shorts.render.renderer import render_clip
 from shorts.signals.index import build_signal_index, save as save_signal_index
@@ -127,7 +128,16 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
             source, cut, index, None, DEFAULT_STYLE, out_dir / f"clip_{i:03d}"
         )
 
-        result = ClipResult(mp4=mp4, thumb=thumb, cut=cut, score=None, hook=None, qa=None)
+        report = qa.check(mp4, cut, index)
+        # QA failure drops the clip from the shipped set but the render is
+        # KEPT on disk and the run keeps going (spec Sec7: partial success
+        # is success) -- only dropped_reason marks it, mp4/thumb stay set.
+        dropped_reason = "; ".join(f.code for f in report.failures) if not report.passed else None
+
+        result = ClipResult(
+            mp4=mp4, thumb=thumb, cut=cut, score=None, hook=None, qa=report,
+            dropped_reason=dropped_reason,
+        )
         results.append(result)
         run_entries.append(
             {
@@ -138,6 +148,11 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
                 "evidence": [
                     {"kind": cl.kind, "t": cl.t, "value": cl.value} for cl in candidate.evidence
                 ],
+                "qa": {
+                    "passed": report.passed,
+                    "failures": [{"code": f.code, "detail": f.detail} for f in report.failures],
+                },
+                "dropped_reason": result.dropped_reason,
             }
         )
 

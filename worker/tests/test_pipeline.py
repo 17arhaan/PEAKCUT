@@ -1,9 +1,20 @@
 """Unit tests for pipeline._fallback_candidates: hand-built tiny SignalIndex
 objects, no real media/rendering -- exercises the speech-anchored window
-placement and its two degenerate cases directly."""
+placement and its two degenerate cases directly.
 
-from shorts.pipeline import _fallback_candidates
-from shorts.types import Curve, MediaInfo, SignalIndex, Span
+Also covers the T8 QA-gate pipeline wiring (partial success): a real e2e
+run against real_talking_head.mp4, with qa.check monkeypatched to force
+exactly one clip to fail -- deterministic and fast, since the actual QA
+check logic (which codes fire for which corruption) is covered by
+test_qa.py, not here."""
+
+import json
+
+from shorts import qa
+from shorts.pipeline import _fallback_candidates, run
+from shorts.types import Curve, MediaInfo, QAFail, QAReport, SignalIndex, Span
+
+from conftest import fixture
 
 
 def _mk_index(**overrides) -> SignalIndex:
@@ -88,3 +99,39 @@ def test_fallback_drops_near_duplicate_windows_on_very_short_video():
             union = (a.t1 - a.t0) + (b.t1 - b.t0) - inter
             iou = inter / union if union > 0 else 0.0
             assert iou <= 0.5
+
+
+def test_run_drops_qa_failed_clip_but_run_still_succeeds(tmp_path, monkeypatch):
+    """A QA failure on one clip must not crash the run -- that clip is kept
+    on disk but marked dropped_reason, and the run still produces its other
+    clips (spec Sec7: partial success is success). qa.check is fully
+    monkeypatched (deterministic pass/fail by call order) rather than
+    delegated to the real check -- real QA correctness (which codes fire
+    for which corruption) is test_qa.py's job; a real render's WORD_CLIP/
+    ALIGN outcome on heuristic (non-word-aligned) cuts is itself
+    real/legitimate gate behavior and not deterministic enough to assert
+    on here without coupling this wiring test to scout's cut placement."""
+    calls = {"n": 0}
+
+    def fake_check(mp4, cut, idx):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return QAReport(
+                passed=False, failures=[QAFail(code="BLACK", detail="forced", route_to="drop")]
+            )
+        return QAReport(passed=True, failures=[])
+
+    monkeypatch.setattr(qa, "check", fake_check)
+
+    results = run(fixture("real_talking_head.mp4"), tmp_path)
+
+    dropped = [r for r in results if r.dropped_reason]
+    kept = [r for r in results if not r.dropped_reason]
+    assert len(dropped) == 1
+    assert dropped[0].dropped_reason == "BLACK"
+    assert dropped[0].mp4.exists()  # render kept on disk even though dropped
+    assert len(kept) >= 1  # partial success: the rest still shipped
+
+    run_json = json.loads((tmp_path / "run.json").read_text())
+    assert any(not e["qa"]["passed"] and e["dropped_reason"] == "BLACK" for e in run_json)
+    assert any(e["qa"]["passed"] and e["dropped_reason"] is None for e in run_json)
