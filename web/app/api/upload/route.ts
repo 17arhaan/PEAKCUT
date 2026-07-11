@@ -1,10 +1,11 @@
 import { createWriteStream } from "node:fs";
 import { rename, rm } from "node:fs/promises";
+import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { LocalStorage, sanitizeKey } from "@/lib/storage";
+import { LocalStorage, resolveStoragePath, sanitizeKey, STORAGE_ROOT } from "@/lib/storage";
 
 // Local dev/test upload sink for the storage seam's putObjectUrl(). A real
 // object-storage backend (R2Storage) wouldn't proxy uploads through the app
@@ -39,7 +40,15 @@ export async function POST(request: Request) {
   }
 
   // No cross-user writes: every key must live under the caller's own prefix.
-  if (!sanitized.startsWith(`u/${userId}/`)) {
+  // Checked against the *resolved* absolute path, not the raw key string —
+  // sanitizeKey's segment check is the primary guard against a key like
+  // `u/<attacker>/../<victim>/f.txt` lexically passing this prefix check
+  // while resolving into another user's tree; this is the second lock.
+  const userRoot = path.resolve(STORAGE_ROOT, "u", userId) + path.sep;
+  if (
+    !sanitized.startsWith(`u/${userId}/`) ||
+    !resolveStoragePath(sanitized).startsWith(userRoot)
+  ) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

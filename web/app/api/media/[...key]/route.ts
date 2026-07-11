@@ -1,10 +1,11 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { resolveStoragePath, sanitizeKey } from "@/lib/storage";
+import { resolveStoragePath, sanitizeKey, STORAGE_ROOT } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -70,8 +71,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
   }
 
   // No cross-user reads: every key must live under the caller's own prefix.
+  // Checked against the *resolved* absolute path, not the raw key string —
+  // sanitizeKey's segment check is the primary guard against a key like
+  // `u/<attacker>/../<victim>/f.txt` lexically passing this prefix check
+  // while resolving into another user's tree; this is the second lock.
   // 404 (not 403) so existence of other users' keys isn't leaked either.
-  if (!sanitized.startsWith(`u/${userId}/`)) {
+  const userRoot = path.resolve(STORAGE_ROOT, "u", userId) + path.sep;
+  if (!sanitized.startsWith(`u/${userId}/`) || !filePath.startsWith(userRoot)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 

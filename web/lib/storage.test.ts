@@ -20,11 +20,28 @@ describe("sanitizeKey", () => {
     expect(() => sanitizeKey("..")).toThrow();
   });
 
-  it("collapses in-root '..' segments without throwing (still contained)", () => {
-    // "user1/.." cancels out, landing back inside root — not a traversal.
-    expect(sanitizeKey("u/user1/../user1/job1/clip.mp4")).toBe(
-      "u/user1/../user1/job1/clip.mp4",
-    );
+  it("rejects '..' segments even when they resolve back under root", () => {
+    // Fix for cross-user IDOR: "u/user1/.." lexically starts with
+    // "u/user1/" (the ownership-check prefix route handlers use) but
+    // resolves into a sibling user's tree. Any bare '..' segment is
+    // rejected outright, regardless of where it resolves.
+    expect(() => sanitizeKey("u/user1/../user1/job1/clip.mp4")).toThrow();
+    expect(() => sanitizeKey("u/user1/../user2/x")).toThrow();
+  });
+
+  it("rejects a bare '.' segment", () => {
+    expect(() => sanitizeKey("u/user1/./job1/clip.mp4")).toThrow();
+  });
+
+  it("rejects empty path segments", () => {
+    expect(() => sanitizeKey("u//user1/job1/clip.mp4")).toThrow();
+    expect(() => sanitizeKey("u/user1/job1/clip.mp4/")).toThrow();
+  });
+
+  it("rejects the cross-user IDOR keys", () => {
+    expect(() => sanitizeKey("u/attacker/../victim/job1/f.txt")).toThrow();
+    expect(() => sanitizeKey("u/attacker/../../evil.txt")).toThrow();
+    expect(() => sanitizeKey("../etc/passwd")).toThrow();
   });
 
   it("rejects absolute paths", () => {

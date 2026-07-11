@@ -81,6 +81,62 @@ test.describe("upload + media serving", () => {
     await contextB.close();
   });
 
+  test("cross-user IDOR via '..' segment is rejected (does not touch victim's file)", async ({
+    page,
+    browser,
+  }) => {
+    // Reviewer-confirmed exploit: sanitizeKey used to return the raw
+    // unnormalized key, and the route's ownership check was a lexical
+    // `startsWith('u/<userId>/')` on that raw string. A key like
+    // `u/<attacker>/../<victim>/pwn.txt` passes that lexical check while
+    // path.resolve collapses it into the victim's own tree.
+    const emailA = `e2e-idor-a-${Date.now()}@example.com`;
+    await signIn(page, emailA);
+    const userIdA = await testUserId(page, emailA);
+
+    const contextB = await browser.newContext();
+    const pageB = await contextB.newPage();
+    const emailB = `e2e-idor-b-${Date.now()}@example.com`;
+    await signIn(pageB, emailB);
+    const userIdB = await testUserId(pageB, emailB);
+
+    // Pre-seed victim's file.
+    const victimKey = `u/${userIdB}/job1/pwn.txt`;
+    const seedRes = await pageB.request.post(
+      `/api/upload?key=${encodeURIComponent(victimKey)}`,
+      { data: "victim's original content" },
+    );
+    expect(seedRes.status()).toBe(200);
+
+    // Attacker (A) tries to overwrite it via a traversal key that starts
+    // with A's own prefix. sanitizeKey's segment check (layer 1) rejects
+    // this outright -> 400, before the route's ownership check (layer 2,
+    // which would 403) ever runs. Either way: never 200.
+    const traversalKey = `u/${userIdA}/../${userIdB}/job1/pwn.txt`;
+    const attackRes = await page.request.post(
+      `/api/upload?key=${encodeURIComponent(traversalKey)}`,
+      { data: "PWNED BY ATTACKER" },
+    );
+    expect(attackRes.status()).not.toBe(200);
+    expect(attackRes.status()).toBeGreaterThanOrEqual(400);
+    expect(attackRes.status()).toBeLessThan(500);
+
+    // Victim's file must be untouched.
+    const victimReadRes = await pageB.request.get(`/api/media/${victimKey}`);
+    expect(victimReadRes.status()).toBe(200);
+    expect(await victimReadRes.text()).toBe("victim's original content");
+
+    // Escape-to-root variant must also be rejected.
+    const rootEscapeRes = await page.request.post(
+      `/api/upload?key=${encodeURIComponent(`u/${userIdA}/../../evil.txt`)}`,
+      { data: "x" },
+    );
+    expect(rootEscapeRes.status()).toBeGreaterThanOrEqual(400);
+    expect(rootEscapeRes.status()).toBeLessThan(500);
+
+    await contextB.close();
+  });
+
   test("rejects path-traversal and absolute-path keys on both routes", async ({ page }) => {
     const email = `e2e-upload-trav-${Date.now()}@example.com`;
     await signIn(page, email);

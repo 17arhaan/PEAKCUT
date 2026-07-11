@@ -27,17 +27,30 @@ export const STORAGE_ROOT = path.join(process.cwd(), ".data", "storage");
  * `..` (raw, or via URL-decoded %2e%2e) or an absolute path into a key
  * could read/write outside the storage root.
  *
- * Deliberately does NOT rely on blocklisting the substring "..": that
- * breaks on legitimate filenames like "my..file.mp4" and can be bypassed
- * by encoding tricks upstream of this function. Instead it normalizes the
- * key by resolving it against `root` and verifies the *resolved* path is
- * still contained under `root` — that containment check is what actually
- * guards it, not the shape of the input string.
+ * Does NOT rely on blocklisting the substring "..": that breaks on
+ * legitimate filenames like "my..file.mp4". Instead it rejects any bare
+ * `.`, `..`, or empty path *segment* (split on "/") — that's what a
+ * traversal actually looks like, and it lets a filename that merely
+ * contains ".." through untouched.
+ *
+ * That segment check is the primary guard, and it matters because this
+ * function returns the *raw* key on success (callers key off the raw
+ * string, e.g. route handlers' `startsWith('u/<userId>/')` ownership
+ * check) — the containment check below only validates the *resolved*
+ * path, so a returned-but-unnormalized key with a `..` segment in it
+ * would still pass a lexical prefix check while resolving elsewhere.
+ * The containment check stays as defense-in-depth against anything the
+ * segment check doesn't anticipate.
  */
 export function sanitizeKey(key: string, root: string = STORAGE_ROOT): string {
   if (!key || key.trim() === "") throw new Error("storage key must not be empty");
   if (key.includes("\0")) throw new Error("storage key must not contain null bytes");
   if (path.isAbsolute(key)) throw new Error("storage key must not be absolute");
+
+  const segments = key.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new Error("storage key must not contain '.', '..', or empty path segments");
+  }
 
   const resolved = path.resolve(root, key);
   const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
