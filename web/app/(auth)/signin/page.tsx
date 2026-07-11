@@ -9,9 +9,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function SignInPage() {
+export default async function SignInPage({ searchParams }: { searchParams: Promise<{ callbackUrl?: string }> }) {
+  const { callbackUrl: callbackUrlParam } = await searchParams;
   const devEnabled = env.AUTH_DEV === "1";
   const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+  const callbackUrl = callbackUrlParam || "/dashboard";
 
   return (
     <div className="flex flex-1 items-center justify-center p-6">
@@ -27,7 +29,7 @@ export default function SignInPage() {
                 "use server";
                 await signIn("credentials", {
                   email: formData.get("email"),
-                  redirectTo: "/dashboard",
+                  redirectTo: callbackUrl,
                 });
               }}
               className="flex flex-col gap-2"
@@ -51,7 +53,7 @@ export default function SignInPage() {
             <form
               action={async () => {
                 "use server";
-                await signIn("google", { redirectTo: "/dashboard" });
+                await signIn("google", { redirectTo: callbackUrl });
               }}
             >
               <Button type="submit" variant="outline" className="w-full">

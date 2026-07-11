@@ -67,7 +67,8 @@ const providers: Provider[] = [];
 
 // Dev credentials provider: any email, no password check. Only ever
 // registered when AUTH_DEV=1 — never in production.
-if (env.AUTH_DEV === "1") {
+// defense-in-depth: dev login can never ship — double-gate on NODE_ENV
+if (env.AUTH_DEV === "1" && process.env.NODE_ENV !== "production") {
   providers.push(
     Credentials({
       id: "credentials",

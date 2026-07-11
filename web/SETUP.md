@@ -22,6 +22,8 @@ Everything else is optional and gated behind a feature that arrives in a
 later task (storage seam, worker seam, OAuth, billing) — leave those unset
 until you need them.
 
+**Security:** never set `AUTH_DEV=1` outside local development — it enables passwordless login.
+
 ## Tests
 
 ```bash
