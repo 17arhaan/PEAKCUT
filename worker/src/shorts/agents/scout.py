@@ -240,7 +240,7 @@ def _transcript_chunks(idx: SignalIndex) -> list[str]:
     return chunks
 
 
-def _prompt(transcript_chunk: str) -> str:
+def _prompt(transcript_chunk: str, note: str = "") -> str:
     return (
         "You are the Scout agent in a shorts-clipping pipeline. Given a "
         "transcript excerpt (bracketed second-resolution timestamps every "
@@ -254,7 +254,8 @@ def _prompt(transcript_chunk: str) -> str:
         f"{_CLAIM_VOCABULARY}\n\n"
         "Transcript:\n"
         f"{transcript_chunk}\n\n"
-        'Respond with ONLY a JSON object of the form {"candidates": '
+        + (f"{note}\n\n" if note else "")
+        + 'Respond with ONLY a JSON object of the form {"candidates": '
         '[{"t0": <float>, "t1": <float>, "reason": <str>, "evidence": '
         '[{"kind": <str>, "t": <float>, "value": <float|str|null>}]}]}. '
         "No prose, no markdown fences."
@@ -326,15 +327,17 @@ def _parse_llm_candidates(
     return admitted, failing
 
 
-def _llm_candidates(idx: SignalIndex, log: AgentLog) -> list[Candidate]:
+def _llm_candidates(idx: SignalIndex, log: AgentLog, note: str = "") -> list[Candidate]:
     """LLM semantic pass: one complete_json call per transcript chunk,
     evidence-gated before admission. A candidate whose evidence fails
     validate_claims gets one re-ask (this chunk's prompt plus the
     violation reasons appended) -- still-failing candidates after that are
-    discarded and logged, never admitted."""
+    discarded and logged, never admitted. `note` (used by the orchestrator's
+    borderline-refinement round) is appended to every chunk's prompt
+    verbatim."""
     out: list[Candidate] = []
     for chunk in _transcript_chunks(idx):
-        prompt = _prompt(chunk)
+        prompt = _prompt(chunk, note)
         data = complete_json(prompt, SCOUT_LLM_SCHEMA, "scout", log)
         admitted, failing = _parse_llm_candidates(data, idx, log)
         out.extend(admitted)
@@ -367,15 +370,17 @@ def _llm_candidates(idx: SignalIndex, log: AgentLog) -> list[Candidate]:
     return out
 
 
-def candidates(idx: SignalIndex, log: AgentLog) -> list[Candidate]:
+def candidates(idx: SignalIndex, log: AgentLog, note: str = "") -> list[Candidate]:
     """Full Scout pass: heuristic rules always, plus (live mode only) the
     LLM semantic pass. Stub mode (SHORTS_LLM=stub, the default -- no API
     key needed) makes _llm_candidates raise StubModeError on its first
     call; that's caught here and logged, so `--llm stub` stays a
-    deterministic, heuristic-only, fully offline run."""
+    deterministic, heuristic-only, fully offline run. `note` is passed
+    through to the LLM pass verbatim -- the orchestrator uses it to ask
+    Scout to refine borderline windows on its second round."""
     heuristic = heuristic_candidates(idx)
     try:
-        llm = _llm_candidates(idx, log)
+        llm = _llm_candidates(idx, log, note)
     except StubModeError:
         log.emit("scout", "llm_pass_skipped", {"reason": "stub mode -- heuristic only"})
         return heuristic
@@ -383,3 +388,71 @@ def candidates(idx: SignalIndex, log: AgentLog) -> list[Candidate]:
     combined = _dedupe(heuristic + llm)
     combined.sort(key=lambda c: (-len(c.evidence), c.t0))
     return combined[:MAX_CANDIDATES]
+
+
+def fallback_candidates(idx: SignalIndex, n: int) -> list[Candidate]:
+    """ponytail: best-effort padding for quiet content where the heuristic
+    (and LLM) passes genuinely find nothing -- evenly-spaced SPEECH-WINDOW
+    candidates, no evidence attached, used by pipeline.py to pad up to its
+    render cap and by the orchestrator's best-effort fallback when the
+    Scout->Critic rounds end with zero keepers.
+
+    N target midpoints are spread evenly across the total speech coverage
+    (idx.speech spans concatenated into one virtual timeline), then mapped
+    back to real time -- so windows land inside/anchored to speech instead
+    of possibly landing in a silent stretch."""
+    duration = idx.media.duration_s
+    if duration <= 0 or n <= 0:
+        return []
+
+    speech = sorted(idx.speech, key=lambda s: s.t0)
+    total_speech = sum(max(0.0, s.t1 - s.t0) for s in speech)
+    span = min(30.0, max(MIN_LEN_S, duration / n))
+
+    if total_speech <= 0.0:
+        # ponytail: no speech at all (e.g. a hand-built index, or a truly
+        # silent clip) -- nothing to anchor to, so fall back to the old
+        # duration-based even spacing.
+        midpoints = [(i + 0.5) * duration / n for i in range(n)]
+    else:
+        midpoints = [_speech_time_at(speech, (i + 0.5) * total_speech / n) for i in range(n)]
+
+    out: list[Candidate] = []
+    for mid in midpoints:
+        t0, t1 = _window_around(mid, span, duration)
+        if t1 - t0 < 1e-9:
+            continue
+        # very short video: evenly-spaced midpoints can land closer together
+        # than the window width, producing overlapping near-duplicate
+        # windows once each is clamped/shifted to fit -- drop those extras
+        # rather than emit them.
+        if any(_iou(Candidate(t0=t0, t1=t1, source="fallback", evidence=[]), c) > 0.5 for c in out):
+            continue
+        out.append(Candidate(t0=t0, t1=t1, source="fallback", evidence=[]))
+    return out
+
+
+def _speech_time_at(speech: list[Span], virtual_t: float) -> float:
+    """Map a position on the "concatenated speech spans" virtual timeline
+    back to a real timestamp."""
+    cum = 0.0
+    for s in speech:
+        length = s.t1 - s.t0
+        if virtual_t <= cum + length:
+            return s.t0 + (virtual_t - cum)
+        cum += length
+    return speech[-1].t1 if speech else virtual_t
+
+
+def _window_around(mid: float, span: float, duration: float) -> tuple[float, float]:
+    """A `span`-second window centered on `mid`, shifted (not just clipped)
+    to stay inside [0, duration]."""
+    t0 = mid - span / 2
+    t1 = mid + span / 2
+    if t0 < 0.0:
+        t1 += -t0
+        t0 = 0.0
+    if t1 > duration:
+        t0 -= t1 - duration
+        t1 = duration
+    return max(0.0, t0), t1
