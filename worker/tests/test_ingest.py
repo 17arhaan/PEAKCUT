@@ -188,6 +188,36 @@ def test_url_preflight_missing_filesize_approx_passes_na(monkeypatch, tmp_path):
     assert media.video.exists()
 
 
+def test_url_post_download_caps_backstop_over_duration_raises_too_long(monkeypatch, tmp_path):
+    """When yt-dlp pre-flight returns "NA" for metadata (passes pre-flight),
+    the real download proceeds. The post-download probe() caps check is the
+    backstop: if probe() reports over-cap duration, reject before extract_wav."""
+    calls = []
+
+    def on_download(args):
+        # Create a small dummy file at the expected output path.
+        out_idx = args.index("-o")
+        dest = Path(args[out_idx + 1].replace("%(ext)s", "mp4"))
+        dest.write_bytes(b"dummy video content")
+
+    monkeypatch.setattr(
+        subprocess, "run", _fake_yt_dlp(calls, preflight_stdout=b"60\nNA\n", on_download=on_download)
+    )
+    # Mock probe to report over-cap duration (>3h).
+    monkeypatch.setattr(
+        "shorts.ingest.probe",
+        lambda p: MediaInfo(duration_s=3 * 3600 + 1, fps=30.0, width=1920, height=1080),
+    )
+    extract_calls = []
+    monkeypatch.setattr("shorts.ingest.extract_wav", lambda *a, **k: extract_calls.append(a))
+
+    with pytest.raises(IngestError) as exc_info:
+        resolve("https://example.com/watch?v=longvideo", tmp_path / "work")
+
+    assert exc_info.value.code == "TOO_LONG"
+    assert extract_calls == []  # caps enforced before the heavy step
+
+
 # --- yt-dlp failure -> typed IngestError mapping --------------------------
 
 
