@@ -18,6 +18,9 @@ export const users = pgTable("users", {
     .$defaultFn(() => crypto.randomUUID()),
   email: text("email").notNull().unique(),
   name: text("name"),
+  // Required by Auth.js drizzle adapter; future-proofing for OAuth integration
+  emailVerified: timestamp("email_verified"),
+  image: text("image"),
   plan: text("plan").notNull().default("free"),
   minutesBalance: integer("minutes_balance").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),

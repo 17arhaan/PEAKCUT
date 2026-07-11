@@ -26,6 +26,7 @@ until you need them.
 
 ```bash
 npm run build        # TS strict, must be clean
+npm run test         # Unit tests (vitest) — auto-provisions test DB
 npx playwright install chromium   # one-time
 npm run test:e2e     # Playwright, chromium only
 ```
