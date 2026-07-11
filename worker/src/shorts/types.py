@@ -150,3 +150,4 @@ class ClipResult:
     hook: Hook | None
     qa: QAReport | None
     dropped_reason: str | None = None
+    repairs: list[dict] = field(default_factory=list)

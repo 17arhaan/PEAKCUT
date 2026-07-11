@@ -133,8 +133,9 @@ def test_run_drops_qa_failed_clip_but_run_still_succeeds(tmp_path, monkeypatch):
     assert len(kept) >= 1  # partial success: the rest still shipped
 
     run_json = json.loads((tmp_path / "run.json").read_text())
-    assert any(not e["qa"]["passed"] and e["dropped_reason"] == "BLACK" for e in run_json)
-    assert any(e["qa"]["passed"] and e["dropped_reason"] is None for e in run_json)
+    clips = run_json["clips"]
+    assert any(not e["qa"]["passed"] and e["dropped_reason"] == "BLACK" for e in clips)
+    assert any(e["qa"]["passed"] and e["dropped_reason"] is None for e in clips)
 
 
 def test_run_ingest_error_writes_failed_run_json_without_crashing(tmp_path, monkeypatch):

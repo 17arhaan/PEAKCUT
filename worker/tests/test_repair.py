@@ -199,7 +199,7 @@ def test_permanent_render_routed_failure_loops_exactly_twice_then_drops(tmp_path
     assert calls["clip_001"] == 3  # 1 initial check + 2 repair-loop re-checks
 
     run_json = json.loads((tmp_path / "run.json").read_text())
-    entry = next(e for e in run_json if Path(e["mp4"]).parent.name == "clip_001")
+    entry = next(e for e in run_json["clips"] if Path(e["paths"]["mp4"]).parent.name == "clip_001")
     assert len(entry["repairs"]) == 2
     assert [r["attempt"] for r in entry["repairs"]] == [1, 2]
     assert all(r["route"] == "render" and r["outcome"] == "failed" for r in entry["repairs"])
@@ -229,7 +229,7 @@ def test_permanent_surgeon_routed_failure_loops_exactly_twice_then_drops(tmp_pat
     assert calls["clip_001"] == 3
 
     run_json = json.loads((tmp_path / "run.json").read_text())
-    entry = next(e for e in run_json if Path(e["mp4"]).parent.name == "clip_001")
+    entry = next(e for e in run_json["clips"] if Path(e["paths"]["mp4"]).parent.name == "clip_001")
     assert len(entry["repairs"]) == 2
     assert all(r["route"] == "surgeon" for r in entry["repairs"])
 
@@ -256,7 +256,7 @@ def test_drop_routed_failure_skips_the_repair_loop_entirely(tmp_path, monkeypatc
     assert calls["clip_001"] == 1  # only the initial check -- no repair re-checks
 
     run_json = json.loads((tmp_path / "run.json").read_text())
-    entry = next(e for e in run_json if Path(e["mp4"]).parent.name == "clip_001")
+    entry = next(e for e in run_json["clips"] if Path(e["paths"]["mp4"]).parent.name == "clip_001")
     assert entry["repairs"] == []
 
 
@@ -277,7 +277,7 @@ def test_talking_head_black_from_source_content_cannot_be_repaired_and_drops(tmp
 
     run_json = json.loads((tmp_path / "run.json").read_text())
     entry = next(
-        e for e in run_json if e["dropped_reason"] and "BLACK" in e["dropped_reason"]
+        e for e in run_json["clips"] if e["dropped_reason"] and "BLACK" in e["dropped_reason"]
     )
     # exhausted the full repair budget -- 2 attempts, both still failing.
     assert len(entry["repairs"]) == 2
