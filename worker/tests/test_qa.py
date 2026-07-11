@@ -17,9 +17,9 @@ import pytest
 
 from conftest import fixture
 from shorts.ffmpeg import probe
-from shorts.qa import _check_align, _check_dur, _check_word_clip, check
+from shorts.qa import _check_align, _check_dur, _check_safe_area, _check_word_clip, check
 from shorts.render.renderer import render_clip
-from shorts.types import Curve, Cut, MediaInfo, SignalIndex, Word
+from shorts.types import Curve, Cut, Hook, MediaInfo, SignalIndex, Word
 
 
 def _mk_index(**overrides) -> SignalIndex:
@@ -220,6 +220,26 @@ def test_check_align_skips_words_with_none_err():
         language="en", words=[Word(text="w", t0=0.0, t1=0.5, conf=0.9, align_err_ms=None)]
     )
     assert _check_align(Cut(t0=0.0, t1=1.0), idx) is None
+
+
+# --- SAFE_AREA: hook title overlay geometry (task 15) --------------------
+
+
+def test_check_safe_area_none_hook_passes():
+    assert _check_safe_area(None, 1080) is None
+
+
+def test_check_safe_area_short_title_passes():
+    hook = Hook(title="A Short Punchy Hook", captions={})
+    assert _check_safe_area(hook, 1080) is None
+
+
+def test_check_safe_area_60_char_title_fails():
+    hook = Hook(title="x" * 60, captions={})
+    fail = _check_safe_area(hook, 1080)
+    assert fail is not None
+    assert fail.code == "SAFE_AREA"
+    assert fail.route_to == "drop"
 
 
 def test_check_align_skips_non_english():

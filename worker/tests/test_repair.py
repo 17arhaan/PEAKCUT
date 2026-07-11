@@ -182,7 +182,7 @@ def test_permanent_render_routed_failure_loops_exactly_twice_then_drops(tmp_path
     2 repairs (not more, not fewer) before giving up and dropping."""
     calls = {"clip_001": 0}
 
-    def fake_check(mp4, cut, idx):
+    def fake_check(mp4, cut, idx, hook=None):
         if mp4.parent.name == "clip_001":
             calls["clip_001"] += 1
             return QAReport(
@@ -212,7 +212,7 @@ def test_permanent_surgeon_routed_failure_loops_exactly_twice_then_drops(tmp_pat
     happens to fail that way."""
     calls = {"clip_001": 0}
 
-    def fake_check(mp4, cut, idx):
+    def fake_check(mp4, cut, idx, hook=None):
         if mp4.parent.name == "clip_001":
             calls["clip_001"] += 1
             return QAReport(
@@ -239,7 +239,7 @@ def test_drop_routed_failure_skips_the_repair_loop_entirely(tmp_path, monkeypatc
     with zero repair attempts logged, not loop and burn a re-render."""
     calls = {"clip_001": 0}
 
-    def fake_check(mp4, cut, idx):
+    def fake_check(mp4, cut, idx, hook=None):
         if mp4.parent.name == "clip_001":
             calls["clip_001"] += 1
             return QAReport(

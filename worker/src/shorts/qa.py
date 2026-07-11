@@ -18,11 +18,19 @@ from pathlib import Path
 from shorts.ffmpeg import probe
 from shorts.signals.index import words_in
 from shorts.signals.video import detect_defects
-from shorts.types import Cut, QAFail, QAReport, SignalIndex
+from shorts.types import Cut, Hook, QAFail, QAReport, SignalIndex
 
 TARGET_W, TARGET_H = 1080, 1920
 _LUFS_TARGET = -14.0
 _LUFS_TOLERANCE = 1.0
+_SAFE_AREA_MAX_CHARS = 40
+_SAFE_AREA_WIDTH_FRAC = 0.9
+# ponytail: char-width heuristic, real text measurement if fonts change --
+# picked so that _SAFE_AREA_MAX_CHARS characters always stays under
+# _SAFE_AREA_WIDTH_FRAC of the frame (40 * 20 = 800px < 0.9*1080 = 972px),
+# so hooks.py's fallback path (hard-capped at _SAFE_AREA_MAX_CHARS) is
+# guaranteed to pass this check purely by the char-length check.
+_SAFE_AREA_AVG_CHAR_WIDTH_PX = 20.0
 # PLAN AMENDMENT (decision 2026-07-11, recorded in signals/align.py): the
 # alignment quality gate was re-anchored to p95<=300ms, not the plan's
 # original 100ms -- this check uses the same 300ms bound.
@@ -39,6 +47,9 @@ _ROUTE = {
     "WORD_CLIP": "surgeon",
     "ALIGN": "surgeon",
     "DUR": "drop",
+    # A bad hook surviving hooks.write's constraint enforcement + re-ask +
+    # (SAFE_AREA-guaranteed) fallback is an anomaly, not a repairable case.
+    "SAFE_AREA": "drop",
 }
 
 _EBUR128_I_RE = re.compile(r"I:\s*(-?[\d.]+) LUFS")
@@ -156,10 +167,37 @@ def _check_align(cut: Cut, idx: SignalIndex) -> QAFail | None:
     return None
 
 
-def check(mp4: Path, cut: Cut, idx: SignalIndex) -> QAReport:
+def _check_safe_area(hook: Hook | None, width: int) -> QAFail | None:
+    """The hook title must fit the top safe area: at most
+    _SAFE_AREA_MAX_CHARS characters, and its estimated rendered width (char
+    count * the heuristic avg glyph width) must not overflow
+    _SAFE_AREA_WIDTH_FRAC of the frame. No-op if there's no hook at all."""
+    if hook is None:
+        return None
+    title = hook.title
+    if len(title) > _SAFE_AREA_MAX_CHARS:
+        return QAFail(
+            code="SAFE_AREA",
+            detail=f"hook title is {len(title)} chars, max {_SAFE_AREA_MAX_CHARS}",
+            route_to=_ROUTE["SAFE_AREA"],
+        )
+    estimated_width = len(title) * _SAFE_AREA_AVG_CHAR_WIDTH_PX
+    max_width = _SAFE_AREA_WIDTH_FRAC * width
+    if estimated_width > max_width:
+        return QAFail(
+            code="SAFE_AREA",
+            detail=f"hook title estimated width {estimated_width:.0f}px > {max_width:.0f}px "
+            f"({_SAFE_AREA_WIDTH_FRAC * 100:.0f}% of {width}px frame)",
+            route_to=_ROUTE["SAFE_AREA"],
+        )
+    return None
+
+
+def check(mp4: Path, cut: Cut, idx: SignalIndex, hook: Hook | None = None) -> QAReport:
     """Run every QA check against a rendered clip. mp4/RES/LUFS/BLACK/FROZEN/
     DUR inspect the rendered output file itself; WORD_CLIP/ALIGN inspect
-    `cut` against the source SignalIndex's transcript."""
+    `cut` against the source SignalIndex's transcript; SAFE_AREA inspects
+    `hook`'s title (skipped entirely if `hook` is None)."""
     info = probe(mp4)
 
     failures = [
@@ -170,6 +208,7 @@ def check(mp4: Path, cut: Cut, idx: SignalIndex) -> QAReport:
             _check_lufs(mp4),
             _check_word_clip(cut, idx),
             _check_align(cut, idx),
+            _check_safe_area(hook, info.width),
         )
         if f is not None
     ]

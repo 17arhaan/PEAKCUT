@@ -10,6 +10,7 @@ from pathlib import Path
 
 from shorts import qa
 from shorts.agent_log import AgentLog
+from shorts.agents import hooks
 from shorts.agents.orchestrator import run_crew
 from shorts.agents.scout import fallback_candidates as _fallback_candidates
 from shorts.agents.surgeon import refine as surgeon_refine, repair as surgeon_repair
@@ -19,8 +20,9 @@ from shorts.types import Claim, ClipResult, QAReport, Scored, SourceMedia
 from shorts.ffmpeg import extract_wav, probe
 
 MAX_CLIPS = 4
-# ponytail: hooks/style selection are later tasks -- one fixed caption
-# preset for every clip until hook-generation/scoring picks per-clip style.
+# ponytail: style selection (picking s1/s2/s3 per clip) is a later task --
+# one fixed caption preset for every clip. Hook titles/captions ARE
+# per-clip now (hooks.write), just not the visual caption style.
 DEFAULT_STYLE = "s1"
 # T14: bounded repair -- QA failures route back to the responsible stage for
 # a re-render/re-cut instead of dropping on the first failure, but loop at
@@ -74,8 +76,9 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
         candidate = scored.candidate
         clip_dir = out_dir / f"clip_{i:03d}"
         cut = surgeon_refine(candidate, index, log)
-        mp4, thumb = render_clip(source, cut, index, None, DEFAULT_STYLE, clip_dir)
-        report = qa.check(mp4, cut, index)
+        hook = hooks.write(cut, index, log)
+        mp4, thumb = render_clip(source, cut, index, hook, DEFAULT_STYLE, clip_dir)
+        report = qa.check(mp4, cut, index, hook=hook)
 
         # T14: QA failure routes back to the responsible stage for a bounded
         # re-repair instead of dropping immediately. Each loop re-renders
@@ -93,8 +96,8 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
             codes = [f.code for f in report.failures]
             if route == "surgeon":
                 cut = surgeon_repair(cut, index, report.failures, log)
-            mp4, thumb = render_clip(source, cut, index, None, DEFAULT_STYLE, clip_dir)
-            report = qa.check(mp4, cut, index)
+            mp4, thumb = render_clip(source, cut, index, hook, DEFAULT_STYLE, clip_dir)
+            report = qa.check(mp4, cut, index, hook=hook)
             outcome = "fixed" if report.passed else "failed"
             repairs.append({"attempt": attempt, "codes": codes, "route": route, "outcome": outcome})
             log.emit(
@@ -108,7 +111,7 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
         dropped_reason = "; ".join(f.code for f in report.failures) if not report.passed else None
 
         result = ClipResult(
-            mp4=mp4, thumb=thumb, cut=cut, score=scored, hook=None, qa=report,
+            mp4=mp4, thumb=thumb, cut=cut, score=scored, hook=hook, qa=report,
             dropped_reason=dropped_reason,
         )
         results.append(result)
@@ -136,6 +139,7 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
                     "passed": report.passed,
                     "failures": [{"code": f.code, "detail": f.detail} for f in report.failures],
                 },
+                "hook": {"title": hook.title, "captions": hook.captions},
                 "repairs": repairs,
                 "dropped_reason": result.dropped_reason,
             }

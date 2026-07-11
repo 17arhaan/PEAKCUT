@@ -113,7 +113,7 @@ def test_run_drops_qa_failed_clip_but_run_still_succeeds(tmp_path, monkeypatch):
     on here without coupling this wiring test to scout's cut placement."""
     calls = {"n": 0}
 
-    def fake_check(mp4, cut, idx):
+    def fake_check(mp4, cut, idx, hook=None):
         calls["n"] += 1
         if calls["n"] == 1:
             return QAReport(

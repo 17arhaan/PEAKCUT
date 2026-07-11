@@ -129,12 +129,10 @@ def render_clip(
     crop fallback chain, burn in karaoke captions built from idx.words,
     loudness-normalize audio to -14 LUFS, and export a thumbnail at
     cut.t0. Writes clip.mp4 + thumb.jpg (+ clip.ass) into `out_dir`.
+    `hook`, if given, burns its title into the top safe area for the first
+    3 seconds (or the whole clip, if shorter) -- same ASS file/pass as the
+    karaoke captions, not a second subtitles filter.
     Returns (mp4_path, thumb_path)."""
-    # ponytail: hook overlay (title card burn-in) is a later task -- accept
-    # the param now so the signature/call sites don't change again, but
-    # ignore it here.
-    del hook
-
     video = Path(video).resolve()
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -144,7 +142,13 @@ def render_clip(
     ass_path = out_dir / "clip.ass"
 
     clip_words = [w for w in idx.words if cut.t0 <= w.t0 < cut.t1]
-    ass_path.write_text(words_to_ass(clip_words, style, (TARGET_W, TARGET_H)))
+    ass_path.write_text(
+        words_to_ass(
+            clip_words, style, (TARGET_W, TARGET_H),
+            hook_title=hook.title if hook else None,
+            clip_duration_s=cut.t1 - cut.t0,
+        )
+    )
 
     face_cx = _scene_face_center_x(idx, cut)
     geom = _crop_geometry(idx.media.width, idx.media.height, face_cx)

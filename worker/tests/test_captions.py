@@ -105,3 +105,49 @@ def test_grouping_covers_every_word_in_order():
     groups = _group_words(_GOLDEN_WORDS)
     flat = [w for g in groups for w in g]
     assert flat == _GOLDEN_WORDS
+
+
+# --- hook overlay (task 15) --------------------------------------------
+
+
+def test_words_to_ass_no_hook_is_unaffected():
+    """Default (no hook) output is byte-identical to the pre-hook golden --
+    karaoke lines/styles are untouched by the new optional param."""
+    assert words_to_ass(_GOLDEN_WORDS, "s1", (1080, 1920)) == _GOLDEN["s1"]
+
+
+def test_words_to_ass_with_hook_adds_style_and_dialogue():
+    out = words_to_ass(_GOLDEN_WORDS, "s1", (1080, 1920), hook_title="Big Reveal", clip_duration_s=10.0)
+
+    assert "Style: hook," in out
+    assert "Dialogue: 0,0:00:00.00,0:00:03.00,hook,,0,0,0,,Big Reveal\n" in out
+    # karaoke lines/styles are unaffected by the hook addition
+    assert "Style: s1,Inter,86,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,1,3,0,2,86,86,384" in out
+    assert "Dialogue: 0,0:00:00.00,0:00:00.70,s1,,0,0,0,,{\\kf20}This {\\kf15}is {\\kf7}a {\\kf28}test,\n" in out
+
+
+def test_words_to_ass_hook_end_clamped_to_short_clip():
+    """Clip shorter than 3s: the hook's End time is min(3, clip duration),
+    not a fixed 3s."""
+    out = words_to_ass(_GOLDEN_WORDS, "s1", (1080, 1920), hook_title="Short Clip", clip_duration_s=1.5)
+    assert "Dialogue: 0,0:00:00.00,0:00:01.50,hook,,0,0,0,,Short Clip\n" in out
+
+
+def test_words_to_ass_hook_style_is_top_aligned():
+    """Alignment=8 (top-center) and MarginV = 15% of height (1920*0.15=288)
+    -- distinct from the karaoke styles' bottom alignment (2)."""
+    out = words_to_ass(_GOLDEN_WORDS, "s1", (1080, 1920), hook_title="Hook", clip_duration_s=10.0)
+    hook_style_line = next(line for line in out.splitlines() if line.startswith("Style: hook,"))
+    fields = hook_style_line.split(",")
+    assert fields[10] == "8"  # Alignment: top-center
+    assert fields[-1] == "288"  # MarginV: 15% of 1920
+
+    hook_dialogue = next(line for line in out.splitlines() if ",hook,," in line)
+    assert hook_dialogue.startswith("Dialogue:")
+
+
+def test_words_to_ass_hook_text_has_no_karaoke_tags():
+    out = words_to_ass(_GOLDEN_WORDS, "s1", (1080, 1920), hook_title="Plain Text Hook", clip_duration_s=10.0)
+    hook_dialogue = next(line for line in out.splitlines() if ",hook,," in line)
+    assert "\\kf" not in hook_dialogue
+    assert hook_dialogue.endswith("Plain Text Hook")
