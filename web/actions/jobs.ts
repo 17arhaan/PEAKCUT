@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
 import { assertOwnedKey } from "@/lib/storage";
 import { worker } from "@/lib/worker";
+import { debit, InsufficientCreditsError, refund } from "@/lib/credits";
 
 export interface CreateJobInput {
   source: string;
@@ -18,6 +19,13 @@ export interface CreateJobInput {
 // gitignored .data/ tree.
 const WORK_ROOT = path.join(process.cwd(), ".data", "work");
 
+// The real minutes amount isn't knowable at job-creation time (video
+// duration is discovered during ingest) -- reconcile() corrects the charge
+// to actual usage once the job finishes (lib/run-import.ts).
+// ponytail: flat URL estimate until duration known; same flat default for
+// uploads (probing the file for its real duration is a v2 nicety).
+const ESTIMATE_MINUTES = 30;
+
 function isHttpUrl(value: string): boolean {
   try {
     const { protocol } = new URL(value);
@@ -25,17 +33,6 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-// W9 implements atomic debit: deducts minutes from users.minutesBalance via
-// a credit_ledger row (idempotent insert+update, same pattern as auth.ts's
-// signup-grant), rejecting when balance is insufficient. The real minutes
-// amount isn't knowable at job-creation time anyway (video duration is
-// discovered during ingest) — that reservation/settlement design is W9's,
-// not this seam's. Stubbed as an always-ok no-op so createJob's flow
-// completes end to end.
-async function debitCredits(_userId: string, _minutes: number): Promise<{ ok: boolean }> {
-  return { ok: true };
 }
 
 /**
@@ -70,13 +67,19 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
     throw new Error("invalid sourceType");
   }
 
-  const debit = await debitCredits(userId, 0);
-  if (!debit.ok) {
-    throw new Error("insufficient credits");
-  }
-
   const jobId = crypto.randomUUID();
   const outDir = path.join(WORK_ROOT, jobId);
+
+  try {
+    await debit(userId, ESTIMATE_MINUTES, jobId);
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      throw new Error(
+        `Not enough minutes — you have ${err.available}, need ${err.required}.`,
+      );
+    }
+    throw err;
+  }
 
   await db.insert(jobs).values({
     id: jobId,
@@ -95,6 +98,11 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
       .update(jobs)
       .set({ status: "failed", error: errorMsg, updatedAt: new Date() })
       .where(eq(jobs.id, jobId));
+    // The job never actually ran -- give the estimate back rather than
+    // stranding it debited against a job that failed before it started.
+    await refund(userId, jobId, ESTIMATE_MINUTES).catch((refundErr) => {
+      console.error(`[job ${jobId}] refund-on-start-failure error:`, refundErr);
+    });
     throw err;
   }
 

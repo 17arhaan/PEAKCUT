@@ -1,25 +1,21 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import NextAuth, { type DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import type { Provider } from "next-auth/providers";
 import type {} from "next-auth/jwt";
 import { db } from "@/lib/db";
-import { creditLedger, users } from "@/lib/db/schema";
+import { users } from "@/lib/db/schema";
 import { env } from "@/lib/env";
-
-const SIGNUP_GRANT_MINUTES = 60;
-const SIGNUP_GRANT_REASON = "signup_grant";
+import { grantSignup } from "@/lib/credits";
 
 /**
  * Finds a user by email or creates one (dev credentials sign-in has no real
  * password — anyone can "register" just by signing in). On first creation,
- * grants a one-time 60-minute signup credit.
- *
- * ponytail: inlined signup grant, moves to lib/credits in W9. Idempotency
- * comes from credit_ledger's UNIQUE(reason, ref) (W2 schema) — the
- * onConflictDoNothing().returning() calls double as "did I just create
- * this row" checks, so concurrent sign-ins can't double-grant.
+ * grants a one-time 60-minute signup credit via lib/credits, in the same tx
+ * as the user-row creation — grant and row commit or roll back together.
+ * Idempotency comes from credit_ledger's UNIQUE(reason, ref) (W2 schema),
+ * so concurrent sign-ins can't double-grant.
  */
 async function findOrCreateDevUser(email: string) {
   return db.transaction(async (tx) => {
@@ -40,26 +36,9 @@ async function findOrCreateDevUser(email: string) {
       return user;
     }
 
-    const [grant] = await tx
-      .insert(creditLedger)
-      .values({
-        userId: created.id,
-        deltaMinutes: SIGNUP_GRANT_MINUTES,
-        reason: SIGNUP_GRANT_REASON,
-        ref: created.id,
-      })
-      .onConflictDoNothing({ target: [creditLedger.reason, creditLedger.ref] })
-      .returning();
-
-    if (grant) {
-      await tx
-        .update(users)
-        .set({ minutesBalance: sql`${users.minutesBalance} + ${SIGNUP_GRANT_MINUTES}` })
-        .where(eq(users.id, created.id));
-      created.minutesBalance = SIGNUP_GRANT_MINUTES;
-    }
-
-    return created;
+    await grantSignup(created.id, tx);
+    const [withBalance] = await tx.select().from(users).where(eq(users.id, created.id));
+    return withBalance ?? created;
   });
 }
 

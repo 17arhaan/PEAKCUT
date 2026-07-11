@@ -5,7 +5,7 @@ import * as schema from "./schema";
 
 // ponytail: node-postgres locally; neon-http swap lands with the Neon task.
 
-type Db = NodePgDatabase<typeof schema>;
+export type Db = NodePgDatabase<typeof schema>;
 
 let instance: Db | undefined;
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentEvents, clips, jobs } from "@/lib/db/schema";
+import { estimatedMinutesFor, reconcile, refund } from "@/lib/credits";
 import { resolveStoragePath } from "@/lib/storage";
 import { AgentEventSchema, RunErrorSchema, RunJsonSchema, type ClipEntry } from "@/lib/types";
 
@@ -32,6 +33,24 @@ export async function importRun(jobId: string, outDir: string): Promise<void> {
       .update(jobs)
       .set({ status: "failed", error: message.slice(0, 2000), updatedAt: new Date() })
       .where(eq(jobs.id, jobId));
+    // Auto-refund on failure (spec §7): every branch that lands here (bad
+    // JSON, schema mismatch, the worker's own {error} shape, a missing
+    // source file for the storage copy, a failed tx) means the job never
+    // produced billable output -- give the full estimate back. Best-effort:
+    // a refund failure must not turn into an uncaught throw out of
+    // importRun (its contract is "never throws"), and it must not clobber
+    // the failed-status write above.
+    try {
+      const [jobRow] = await db.select({ userId: jobs.userId }).from(jobs).where(eq(jobs.id, jobId));
+      if (jobRow) {
+        const estimate = await estimatedMinutesFor(jobRow.userId, jobId);
+        if (estimate > 0) {
+          await refund(jobRow.userId, jobId, estimate);
+        }
+      }
+    } catch (refundErr) {
+      console.error(`[job ${jobId}] refund-on-failure error:`, refundErr);
+    }
   }
 }
 
@@ -149,6 +168,20 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
     // part of that transaction, so clean them up ourselves.
     await cleanupCopiedKeys(copiedKeys);
     throw err;
+  }
+
+  // Job succeeded (status is already 'done' as of the tx above) -- correct
+  // its charge from the job-creation estimate to actual usage. Dropped-only
+  // runs (every clip dropped) still land here and still reconcile to
+  // actual, not a full refund: the pipeline did the compute regardless of
+  // how many clips survived QA. Deliberately outside the tx above and its
+  // own try/catch: a reconcile failure is a credits-side problem, not an
+  // import problem, and must never retroactively flip an already-committed
+  // 'done' job back to 'failed'.
+  try {
+    await reconcile(userId, jobId, durationMin ?? 0);
+  } catch (err) {
+    console.error(`[job ${jobId}] reconcile error:`, err);
   }
 }
 

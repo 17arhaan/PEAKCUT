@@ -89,7 +89,7 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
         </CardContent>
       </Card>
 
-      {!hasClips && data.status !== "done" ? (
+      {!hasClips && data.status !== "done" && data.status !== "failed" ? (
         <p className="text-sm text-muted-foreground">Working on your clips…</p>
       ) : null}
 

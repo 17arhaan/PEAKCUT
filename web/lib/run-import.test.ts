@@ -5,9 +5,15 @@ import { asc, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { agentEvents, clips, jobs, users } from "@/lib/db/schema";
+import { balance, debit } from "@/lib/credits";
 import { importRun } from "@/lib/run-import";
 import { resolveStoragePath, storage } from "@/lib/storage";
 import { RunJsonSchema } from "@/lib/types";
+
+// Matches actions/jobs.ts's flat estimate -- setup() debits this up front
+// so importRun's reconcile/refund wiring has a real job_debit row to
+// correct against, same as the real createJob -> worker -> importRun flow.
+const ESTIMATE_MINUTES = 30;
 
 const FIXTURE_PATH = path.join(process.cwd(), "test/fixtures/run.fixture.json");
 const AGENT_EVENTS_FIXTURE_PATH = path.join(process.cwd(), "test/fixtures/agent_events.fixture.jsonl");
@@ -49,8 +55,9 @@ function makeRun(clipEntries: unknown[], overrides: Record<string, unknown> = {}
 async function setup() {
   const userId = crypto.randomUUID();
   const jobId = crypto.randomUUID();
-  await db.insert(users).values({ id: userId, email: `run-import-${userId}@example.com` });
+  await db.insert(users).values({ id: userId, email: `run-import-${userId}@example.com`, minutesBalance: 100 });
   await db.insert(jobs).values({ id: jobId, userId, sourceType: "url", status: "processing" });
+  await debit(userId, ESTIMATE_MINUTES, jobId);
   const outDir = await mkdtemp(path.join(tmpdir(), "run-import-test-"));
   return { userId, jobId, outDir };
 }
@@ -149,6 +156,14 @@ describe("importRun: full import of the real fixture", () => {
     expect(c3.droppedReason).toBeNull();
     expect(c4.status).toBe("ready");
     expect(c4.droppedReason).toBeNull();
+
+    // On success, run-import reconciles the ESTIMATE_MINUTES=30 debit down
+    // to actual usage (round(75.008267/60) = 1min): net charge is 1min, a
+    // 29min refund landed as a job_reconcile ledger row. (setup()'s 100
+    // starting balance is seeded directly, not via the ledger, so this
+    // asserts against balance() only -- ledgerSum()'s cache-truth invariant
+    // is covered by credits.test.ts's fully ledger-backed sequence.)
+    expect(await balance(userId)).toBe(99);
   });
 
   it("is idempotent: re-importing the same run does not duplicate clip rows", async () => {
@@ -225,6 +240,10 @@ describe("importRun: error paths", () => {
 
     const rows = await db.select().from(clips).where(eq(clips.jobId, jobId));
     expect(rows).toHaveLength(0);
+
+    // Auto-refund on failure (spec §7): the job never produced billable
+    // output, so the full ESTIMATE_MINUTES debit from setup() comes back.
+    expect(await balance(userId)).toBe(100);
   });
 
   it("fails loudly on a run.json version mismatch", async () => {

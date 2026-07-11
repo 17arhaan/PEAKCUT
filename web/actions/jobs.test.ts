@@ -11,6 +11,7 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { jobs, users } from "@/lib/db/schema";
 import { worker } from "@/lib/worker";
+import { balance } from "@/lib/credits";
 import { createJob } from "./jobs";
 
 const mockAuth = vi.mocked(auth);
@@ -21,9 +22,12 @@ describe("createJob", () => {
   const otherUserId = crypto.randomUUID();
 
   beforeAll(async () => {
+    // W9: createJob now debits real minutes (ESTIMATE_MINUTES) before
+    // starting the worker -- seed enough balance for every debit these
+    // tests make across the whole describe block.
     await db.insert(users).values([
-      { id: userId, email: `jobs-test-${userId}@example.com` },
-      { id: otherUserId, email: `jobs-test-${otherUserId}@example.com` },
+      { id: userId, email: `jobs-test-${userId}@example.com`, minutesBalance: 1000 },
+      { id: otherUserId, email: `jobs-test-${otherUserId}@example.com`, minutesBalance: 1000 },
     ]);
   });
 
@@ -120,6 +124,7 @@ describe("createJob", () => {
 
   it("marks job failed when worker.start rejects", async () => {
     mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+    const balanceBefore = await balance(userId);
 
     let capturedJobId: string | undefined;
     mockWorkerStart.mockImplementationOnce(async (job) => {
@@ -138,5 +143,26 @@ describe("createJob", () => {
       status: "failed",
       error: "mkdir failed",
     });
+
+    // The job never ran -- the estimate debited before worker.start should
+    // have been refunded, not left stranded (net balance unchanged).
+    expect(await balance(userId)).toBe(balanceBefore);
+  });
+
+  it("rejects with a friendly message and creates no job row when balance is insufficient", async () => {
+    const poorUserId = crypto.randomUUID();
+    await db.insert(users).values({ id: poorUserId, email: `jobs-test-poor-${poorUserId}@example.com`, minutesBalance: 10 });
+    mockAuth.mockResolvedValue({ user: { id: poorUserId } } as never);
+
+    await expect(
+      createJob({ source: "https://youtube.com/watch?v=x", sourceType: "url" }),
+    ).rejects.toThrow(/Not enough minutes.*have 10.*need 30/);
+
+    expect(mockWorkerStart).not.toHaveBeenCalled();
+    const rows = await db.select().from(jobs).where(eq(jobs.userId, poorUserId));
+    expect(rows).toHaveLength(0);
+    expect(await balance(poorUserId)).toBe(10); // untouched
+
+    await db.delete(users).where(eq(users.id, poorUserId));
   });
 });
