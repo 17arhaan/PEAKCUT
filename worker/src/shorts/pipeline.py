@@ -9,7 +9,8 @@ import json
 from pathlib import Path
 
 from shorts import qa
-from shorts.agents.scout import MIN_LEN_S, heuristic_candidates
+from shorts.agent_log import AgentLog
+from shorts.agents.scout import MIN_LEN_S, candidates as scout_candidates
 from shorts.render.renderer import render_clip
 from shorts.signals.index import build_signal_index, save as save_signal_index
 from shorts.types import Candidate, ClipResult, Cut, SignalIndex, SourceMedia, Span
@@ -104,6 +105,8 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    log = AgentLog(out_dir / "agent_events.jsonl")
+
     wav = extract_wav(source, out_dir / "audio.wav")
     media = SourceMedia(video=source, wav16k=wav, info=probe(source))
     index = build_signal_index(media, out_dir)
@@ -114,7 +117,7 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
         (out_dir / "run.json").write_text(json.dumps([], indent=2))
         return []
 
-    candidates = heuristic_candidates(index)
+    candidates = scout_candidates(index, log)
     if len(candidates) < MAX_CLIPS:
         candidates = candidates + _fallback_candidates(index, MAX_CLIPS - len(candidates))
     candidates.sort(key=lambda c: (-len(c.evidence), c.t0))

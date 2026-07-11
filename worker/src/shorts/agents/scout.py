@@ -1,14 +1,26 @@
-"""Heuristic Scout: signal-driven candidate-moment finder over a
-SignalIndex. No LLM here -- three overlap rules over the raw signals each
-propose candidate clip windows, and every candidate carries the Claims that
-justify it (the evidence-gate vocabulary a later Critic task consumes).
+"""Scout: candidate-moment finder over a SignalIndex. Two passes feed the
+same evidence-gate vocabulary (a later Critic task consumes it):
+
+  - heuristic_candidates(idx): three overlap rules over the raw signals,
+    no LLM, always run.
+  - candidates(idx, log): the full entrypoint -- heuristic pass plus (live
+    mode only) an LLM semantic pass over the transcript, looking for hot
+    takes/stories/punchlines/questions. LLM candidates must cite Claims
+    that pass agents.evidence.validate_claims before admission; a
+    candidate whose evidence doesn't resolve gets one re-ask with the
+    violation reasons appended, then is discarded if it still doesn't
+    resolve. Stub mode (SHORTS_LLM=stub, the default) skips the LLM pass
+    entirely and returns heuristic-only results.
 """
 
 import math
 import statistics
 
+from shorts.agent_log import AgentLog
+from shorts.agents.evidence import validate_claims
+from shorts.agents.llm import StubModeError, complete_json
 from shorts.signals.index import events_in, peaks_in
-from shorts.types import Candidate, Claim, SignalIndex
+from shorts.types import Candidate, Claim, SignalIndex, Span
 
 MAX_CANDIDATES = 20
 MIN_LEN_S = 10.0
@@ -184,3 +196,190 @@ def heuristic_candidates(idx: SignalIndex) -> list[Candidate]:
     deduped = _dedupe(raw)
     deduped.sort(key=lambda c: (-len(c.evidence), c.t0))
     return deduped[:MAX_CANDIDATES]
+
+
+# --- LLM semantic pass ---------------------------------------------------
+
+# ponytail: cost ceiling -- one complete_json call per ~2000-word chunk.
+# Every fixture here is small enough to be one chunk; a multi-hour video
+# would mean dozens of calls with no cap on total spend yet -- the
+# Critic's per-run token budget (later task) is where that gets enforced,
+# not here.
+_CHUNK_WORDS = 2000
+_TIMESTAMP_EVERY_N_WORDS = 10
+
+_CLAIM_VOCABULARY = """\
+energy_peak  -- a measured RMS energy spike near that timestamp (value = sigma above baseline)
+laughter     -- a detected laughter audio event at that timestamp
+applause     -- a detected applause audio event at that timestamp
+rate_surge   -- a speaking-rate surge span containing that timestamp
+silence      -- a silence span near that timestamp
+scene_stable -- a stable camera scene (>=15s) containing that timestamp
+quote        -- value is a verbatim substring of the transcript starting at that timestamp"""
+
+SCOUT_LLM_SCHEMA = {
+    "required": ["candidates"],
+    "properties": {"candidates": {"type": "array"}},
+}
+
+
+def _transcript_chunks(idx: SignalIndex) -> list[str]:
+    """Format idx.words as ~2000-word chunks, each with a second-resolution
+    timestamp every ~10 words -- every fixture in this repo is small enough
+    to be a single chunk."""
+    words = idx.words
+    chunks = []
+    for i in range(0, len(words), _CHUNK_WORDS):
+        piece = words[i : i + _CHUNK_WORDS]
+        tokens = []
+        for j, w in enumerate(piece):
+            if j % _TIMESTAMP_EVERY_N_WORDS == 0:
+                tokens.append(f"[{w.t0:.0f}s]")
+            tokens.append(w.text)
+        chunks.append(" ".join(tokens))
+    return chunks
+
+
+def _prompt(transcript_chunk: str) -> str:
+    return (
+        "You are the Scout agent in a shorts-clipping pipeline. Given a "
+        "transcript excerpt (bracketed second-resolution timestamps every "
+        "~10 words), find candidate moments worth clipping as a short: hot "
+        "takes, short self-contained stories, punchlines, or interesting "
+        "questions.\n\n"
+        "Every candidate must cite at least one evidence claim from this "
+        "vocabulary ONLY, and every claim must be something you can "
+        "actually observe in the transcript below -- do not invent "
+        "timestamps or values:\n"
+        f"{_CLAIM_VOCABULARY}\n\n"
+        "Transcript:\n"
+        f"{transcript_chunk}\n\n"
+        'Respond with ONLY a JSON object of the form {"candidates": '
+        '[{"t0": <float>, "t1": <float>, "reason": <str>, "evidence": '
+        '[{"kind": <str>, "t": <float>, "value": <float|str|null>}]}]}. '
+        "No prose, no markdown fences."
+    )
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _parse_evidence(raw: object) -> list[Claim] | None:
+    """Build Claims from a raw evidence list; None if the list itself, or
+    any single entry in it, is malformed -- the whole candidate is
+    discarded in that case (not just the bad entry), per the LLM response
+    schema."""
+    if not isinstance(raw, list):
+        return None
+    claims = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return None
+        kind, t, value = entry.get("kind"), entry.get("t"), entry.get("value")
+        if not isinstance(kind, str) or not _is_number(t):
+            return None
+        if value is not None and not isinstance(value, (str, int, float)):
+            return None
+        if isinstance(value, bool):
+            return None
+        claims.append(Claim(kind=kind, t=float(t), value=value))
+    return claims
+
+
+def _parse_llm_candidates(
+    data: dict, idx: SignalIndex, log: AgentLog
+) -> tuple[list[Candidate], list[tuple[Candidate, list]]]:
+    """Parse one complete_json response into (admitted, failing) LLM
+    candidates -- `failing` pairs each candidate with the Violations its
+    evidence produced, for the caller to build a re-ask prompt from.
+    Malformed candidates (bad t0/t1 or evidence) are discarded and logged
+    here, not passed to either bucket."""
+    duration = idx.media.duration_s
+    admitted: list[Candidate] = []
+    failing: list[tuple[Candidate, list]] = []
+    for raw in data.get("candidates", []):
+        if not isinstance(raw, dict):
+            continue
+        t0, t1 = raw.get("t0"), raw.get("t1")
+        if not _is_number(t0) or not _is_number(t1):
+            log.emit("scout", "llm_candidate_discarded", {"reason": "malformed t0/t1", "raw": raw})
+            continue
+        claims = _parse_evidence(raw.get("evidence"))
+        if claims is None:
+            log.emit(
+                "scout", "llm_candidate_discarded",
+                {"reason": "malformed evidence entry", "raw": raw},
+            )
+            continue
+        reason = raw.get("reason", "")
+        for wt0, wt1 in _clamp_windows(float(t0), float(t1), duration):
+            candidate = Candidate(
+                t0=wt0, t1=wt1, source="llm", evidence=list(claims),
+                notes=reason if isinstance(reason, str) else "",
+            )
+            violations = validate_claims(claims, idx, Span(t0=wt0, t1=wt1))
+            if violations:
+                failing.append((candidate, violations))
+            else:
+                admitted.append(candidate)
+    return admitted, failing
+
+
+def _llm_candidates(idx: SignalIndex, log: AgentLog) -> list[Candidate]:
+    """LLM semantic pass: one complete_json call per transcript chunk,
+    evidence-gated before admission. A candidate whose evidence fails
+    validate_claims gets one re-ask (this chunk's prompt plus the
+    violation reasons appended) -- still-failing candidates after that are
+    discarded and logged, never admitted."""
+    out: list[Candidate] = []
+    for chunk in _transcript_chunks(idx):
+        prompt = _prompt(chunk)
+        data = complete_json(prompt, SCOUT_LLM_SCHEMA, "scout", log)
+        admitted, failing = _parse_llm_candidates(data, idx, log)
+        out.extend(admitted)
+        if not failing:
+            continue
+
+        reasons = "\n".join(
+            f"- candidate [{c.t0:.1f}, {c.t1:.1f}]: " + "; ".join(v.reason for v in vs)
+            for c, vs in failing
+        )
+        reask_prompt = (
+            f"{prompt}\n\nThe following candidates were rejected because their "
+            f"evidence could not be verified against the video's measured signals:\n"
+            f"{reasons}\n\nRespond again with ONLY corrected, verifiable candidates "
+            "in the same JSON schema."
+        )
+        data = complete_json(reask_prompt, SCOUT_LLM_SCHEMA, "scout", log)
+        admitted, failing = _parse_llm_candidates(data, idx, log)
+        out.extend(admitted)
+        for candidate, violations in failing:
+            log.emit(
+                "scout", "llm_candidate_discarded",
+                {
+                    "reason": "evidence violation after re-ask",
+                    "t0": candidate.t0,
+                    "t1": candidate.t1,
+                    "violations": [v.reason for v in violations],
+                },
+            )
+    return out
+
+
+def candidates(idx: SignalIndex, log: AgentLog) -> list[Candidate]:
+    """Full Scout pass: heuristic rules always, plus (live mode only) the
+    LLM semantic pass. Stub mode (SHORTS_LLM=stub, the default -- no API
+    key needed) makes _llm_candidates raise StubModeError on its first
+    call; that's caught here and logged, so `--llm stub` stays a
+    deterministic, heuristic-only, fully offline run."""
+    heuristic = heuristic_candidates(idx)
+    try:
+        llm = _llm_candidates(idx, log)
+    except StubModeError:
+        log.emit("scout", "llm_pass_skipped", {"reason": "stub mode -- heuristic only"})
+        return heuristic
+
+    combined = _dedupe(heuristic + llm)
+    combined.sort(key=lambda c: (-len(c.evidence), c.t0))
+    return combined[:MAX_CANDIDATES]
