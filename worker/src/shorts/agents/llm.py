@@ -57,10 +57,12 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
     `schema`. Retries once if the model's response is invalid JSON or fails
     the schema check; raises LlmError if the retry also fails. Every
     attempt (successful or not) is logged via `log.emit` with its token
-    counts. Raises StubModeError immediately if SHORTS_LLM is unset or
-    "stub" -- no network call is made in that mode."""
-    if os.environ.get("SHORTS_LLM", "stub") == "stub":
-        raise StubModeError(f"SHORTS_LLM=stub -- {agent} must use its deterministic path")
+    counts. Raises StubModeError immediately unless SHORTS_LLM is exactly
+    "live" -- unset, "stub", or any typo/other value all stay in stub mode
+    (fail closed rather than accidentally going live on a mistyped env var),
+    so no network call is made in that mode."""
+    if os.environ.get("SHORTS_LLM", "stub") != "live":
+        raise StubModeError(f"SHORTS_LLM != live -- {agent} must use its deterministic path")
 
     model = os.environ.get("SHORTS_LLM_MODEL", DEFAULT_MODEL)
     client = anthropic.Anthropic()

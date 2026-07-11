@@ -1,4 +1,4 @@
-"""Unit tests for pipeline._fallback_candidates: hand-built tiny SignalIndex
+"""Unit tests for scout.fallback_candidates: hand-built tiny SignalIndex
 objects, no real media/rendering -- exercises the speech-anchored window
 placement and its two degenerate cases directly.
 
@@ -10,8 +10,11 @@ test_qa.py, not here."""
 
 import json
 
+import pytest
+
 from shorts import ingest, qa
-from shorts.pipeline import _fallback_candidates, run
+from shorts.agents.scout import fallback_candidates as _fallback_candidates
+from shorts.pipeline import RUN_SCHEMA_VERSION, render_style, run
 from shorts.types import Curve, MediaInfo, QAFail, QAReport, SignalIndex, Span
 
 from conftest import fixture
@@ -155,5 +158,12 @@ def test_run_ingest_error_writes_failed_run_json_without_crashing(tmp_path, monk
     assert results == []
     run_json = json.loads((tmp_path / "run.json").read_text())
     assert run_json == {
-        "error": {"code": "GEO_BLOCKED", "message": "This video isn't available in your region."}
+        "version": RUN_SCHEMA_VERSION,
+        "error": {"code": "GEO_BLOCKED", "message": "This video isn't available in your region."},
     }
+
+
+def test_render_style_rejects_invalid_style(tmp_path):
+    with pytest.raises(ValueError):
+        render_style(tmp_path, "../../etc")
+    assert list(tmp_path.iterdir()) == []

@@ -76,6 +76,8 @@ def _measure_lufs(mp4: Path) -> float:
 
 
 def _check_res(width: int, height: int) -> QAFail | None:
+    # ponytail: RES intentionally checks resolution only -- fps/bitrate were
+    # narrowed out per plan T8, even though spec Sec4 named all three.
     if (width, height) != (TARGET_W, TARGET_H):
         return QAFail(
             code="RES", detail=f"{width}x{height} != {TARGET_W}x{TARGET_H}", route_to=_ROUTE["RES"]

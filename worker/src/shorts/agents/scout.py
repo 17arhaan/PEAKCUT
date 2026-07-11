@@ -393,9 +393,8 @@ def candidates(idx: SignalIndex, log: AgentLog, note: str = "") -> list[Candidat
 def fallback_candidates(idx: SignalIndex, n: int) -> list[Candidate]:
     """ponytail: best-effort padding for quiet content where the heuristic
     (and LLM) passes genuinely find nothing -- evenly-spaced SPEECH-WINDOW
-    candidates, no evidence attached, used by pipeline.py to pad up to its
-    render cap and by the orchestrator's best-effort fallback when the
-    Scout->Critic rounds end with zero keepers.
+    candidates, no evidence attached, used by orchestrator._best_effort when
+    the Scout->Critic rounds end with zero keepers.
 
     N target midpoints are spread evenly across the total speech coverage
     (idx.speech spans concatenated into one virtual timeline), then mapped

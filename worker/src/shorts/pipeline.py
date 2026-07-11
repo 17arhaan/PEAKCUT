@@ -35,9 +35,9 @@ from shorts import ingest, qa
 from shorts.agent_log import AgentLog
 from shorts.agents import hooks
 from shorts.agents.orchestrator import run_crew
-from shorts.agents.scout import fallback_candidates as _fallback_candidates
 from shorts.agents.surgeon import refine as surgeon_refine, repair as surgeon_repair
 from shorts.ingest import IngestError
+from shorts.render.captions import _PRESETS
 from shorts.render.renderer import render_clip
 from shorts.signals.index import build_signal_index, load as load_signal_index, save as save_signal_index
 from shorts.types import (
@@ -501,7 +501,13 @@ def run(source: str | Path, out_dir: Path) -> list[ClipResult]:
             media = ingest.resolve(source_id, out_dir)
         except IngestError as exc:
             (out_dir / "run.json").write_text(
-                json.dumps({"error": {"code": exc.code, "message": exc.message}}, indent=2)
+                json.dumps(
+                    {
+                        "version": RUN_SCHEMA_VERSION,
+                        "error": {"code": exc.code, "message": exc.message},
+                    },
+                    indent=2,
+                )
             )
             return []
         _write_media_checkpoint(out_dir, source_id, media)
@@ -576,6 +582,8 @@ def render_style(workdir: Path, style: str) -> list[ClipResult]:
     if RES/LUFS/BLACK/FROZEN somehow still fails on the restyled render,
     it's reported via qa/dropped_reason same as a first-pass failure, just
     without a retry loop burning a second re-render for a style switch."""
+    if style not in _PRESETS:
+        raise ValueError(f"unknown style {style!r} -- valid styles: {sorted(_PRESETS)}")
     workdir = Path(workdir)
     index = load_signal_index(workdir / "signals.json")
     media_data = json.loads((workdir / "media.json").read_text())

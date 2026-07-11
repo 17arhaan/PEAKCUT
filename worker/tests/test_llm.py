@@ -39,6 +39,17 @@ def test_explicit_stub_mode_raises_stub_mode_error(tmp_path, monkeypatch):
         complete_json("prompt", SCHEMA, "scout", log)
 
 
+def test_anything_but_live_stays_in_stub_mode(tmp_path, monkeypatch):
+    """Only the exact value "live" should go live -- a typo like "Live" or
+    an unrelated value like "off" must fail closed into stub mode, not
+    silently start making network calls."""
+    log = AgentLog(tmp_path / "log.jsonl")
+    for value in ("Live", "off"):
+        monkeypatch.setenv("SHORTS_LLM", value)
+        with pytest.raises(StubModeError):
+            complete_json("prompt", SCHEMA, "scout", log)
+
+
 def test_valid_json_first_try_returns_parsed_dict(tmp_path, monkeypatch):
     monkeypatch.setenv("SHORTS_LLM", "live")
     log = AgentLog(tmp_path / "log.jsonl")
