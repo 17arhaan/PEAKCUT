@@ -32,7 +32,7 @@ shorts = "shorts.cli:main"
 
 [tool.pytest.ini_options]
 markers = [
-    "live: real-network LLM smoke tests -- require SHORTS_LLM=live and ANTHROPIC_API_KEY, skipped otherwise",
+    "live: real-network smoke tests (LLM calls require SHORTS_LLM=live + ANTHROPIC_API_KEY; ingest/yt-dlp requires SHORTS_LIVE=1) -- skipped otherwise",
 ]
 
 # opencv three-way conflict: scenedetect hard-depends on "opencv-python" and

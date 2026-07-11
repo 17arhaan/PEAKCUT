@@ -10,7 +10,7 @@ test_qa.py, not here."""
 
 import json
 
-from shorts import qa
+from shorts import ingest, qa
 from shorts.pipeline import _fallback_candidates, run
 from shorts.types import Curve, MediaInfo, QAFail, QAReport, SignalIndex, Span
 
@@ -135,3 +135,24 @@ def test_run_drops_qa_failed_clip_but_run_still_succeeds(tmp_path, monkeypatch):
     run_json = json.loads((tmp_path / "run.json").read_text())
     assert any(not e["qa"]["passed"] and e["dropped_reason"] == "BLACK" for e in run_json)
     assert any(e["qa"]["passed"] and e["dropped_reason"] is None for e in run_json)
+
+
+def test_run_ingest_error_writes_failed_run_json_without_crashing(tmp_path, monkeypatch):
+    """An IngestError from the front door (T16) must not propagate as a
+    crash -- the pipeline catches it, writes a failed run.json carrying the
+    typed code + message, and returns an empty result list. resolve() is
+    fully monkeypatched here -- ingest.py's own error-mapping correctness is
+    test_ingest.py's job; this is purely the pipeline wiring."""
+
+    def fake_resolve(source, workdir):
+        raise ingest.IngestError("GEO_BLOCKED", "This video isn't available in your region.")
+
+    monkeypatch.setattr(ingest, "resolve", fake_resolve)
+
+    results = run("https://example.com/watch?v=blocked", tmp_path)
+
+    assert results == []
+    run_json = json.loads((tmp_path / "run.json").read_text())
+    assert run_json == {
+        "error": {"code": "GEO_BLOCKED", "message": "This video isn't available in your region."}
+    }

@@ -8,16 +8,16 @@ a real implementation in a later task.
 import json
 from pathlib import Path
 
-from shorts import qa
+from shorts import ingest, qa
 from shorts.agent_log import AgentLog
 from shorts.agents import hooks
 from shorts.agents.orchestrator import run_crew
 from shorts.agents.scout import fallback_candidates as _fallback_candidates
 from shorts.agents.surgeon import refine as surgeon_refine, repair as surgeon_repair
+from shorts.ingest import IngestError
 from shorts.render.renderer import render_clip
 from shorts.signals.index import build_signal_index, save as save_signal_index
-from shorts.types import Claim, ClipResult, QAReport, Scored, SourceMedia
-from shorts.ffmpeg import extract_wav, probe
+from shorts.types import Claim, ClipResult, QAReport, Scored
 
 MAX_CLIPS = 4
 # ponytail: style selection (picking s1/s2/s3 per clip) is a later task --
@@ -48,15 +48,23 @@ def _claim_json(cl: Claim) -> dict:
     return {"kind": cl.kind, "t": cl.t, "value": cl.value}
 
 
-def run(source: Path, out_dir: Path) -> list[ClipResult]:
-    source = Path(source)
+def run(source: str | Path, out_dir: Path) -> list[ClipResult]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log = AgentLog(out_dir / "agent_events.jsonl")
 
-    wav = extract_wav(source, out_dir / "audio.wav")
-    media = SourceMedia(video=source, wav16k=wav, info=probe(source))
+    # Front door: local path passthrough or yt-dlp download, caps enforced,
+    # yt-dlp failures mapped to typed codes -- str() rather than Path() so a
+    # URL's "//" doesn't get collapsed by Path normalization.
+    try:
+        media = ingest.resolve(str(source), out_dir)
+    except IngestError as exc:
+        (out_dir / "run.json").write_text(
+            json.dumps({"error": {"code": exc.code, "message": exc.message}}, indent=2)
+        )
+        return []
+
     index = build_signal_index(media, out_dir)
     save_signal_index(index, out_dir / "signals.json")
 
@@ -77,7 +85,7 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
         clip_dir = out_dir / f"clip_{i:03d}"
         cut = surgeon_refine(candidate, index, log)
         hook = hooks.write(cut, index, log)
-        mp4, thumb = render_clip(source, cut, index, hook, DEFAULT_STYLE, clip_dir)
+        mp4, thumb = render_clip(media.video, cut, index, hook, DEFAULT_STYLE, clip_dir)
         report = qa.check(mp4, cut, index, hook=hook)
 
         # T14: QA failure routes back to the responsible stage for a bounded
@@ -96,7 +104,7 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
             codes = [f.code for f in report.failures]
             if route == "surgeon":
                 cut = surgeon_repair(cut, index, report.failures, log)
-            mp4, thumb = render_clip(source, cut, index, hook, DEFAULT_STYLE, clip_dir)
+            mp4, thumb = render_clip(media.video, cut, index, hook, DEFAULT_STYLE, clip_dir)
             report = qa.check(mp4, cut, index, hook=hook)
             outcome = "fixed" if report.passed else "failed"
             repairs.append({"attempt": attempt, "codes": codes, "route": route, "outcome": outcome})

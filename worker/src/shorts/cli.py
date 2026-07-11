@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> None:
     run_parser = subparsers.add_parser(
         "run", help="run the pipeline on a video, writing clips to -o/--out"
     )
-    run_parser.add_argument("source", help="path to the source video")
+    run_parser.add_argument("source", help="path to the source video, or a video URL")
     run_parser.add_argument("-o", "--out", required=True, help="output directory")
 
     args = parser.parse_args(argv)
@@ -93,7 +93,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "run":
         from shorts.pipeline import run as run_pipeline
 
-        results = run_pipeline(Path(args.source), Path(args.out))
+        # args.source is passed through as a string, NOT wrapped in Path() --
+        # Path() collapses a URL's "://" down to ":/" (single slash), which
+        # breaks it. ingest.resolve() branches on local-path-vs-URL itself.
+        results = run_pipeline(args.source, Path(args.out))
         print(f"wrote {len(results)} clip(s) to {args.out}")
         sys.exit(0)
 
