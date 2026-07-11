@@ -90,7 +90,7 @@ export default async function DashboardPage() {
           </TableHeader>
           <TableBody>
             {userJobs.map((job) => {
-              const badge = STATUS_BADGE[job.status];
+              const badge = STATUS_BADGE[job.status] ?? { label: job.status, variant: "secondary" as const };
               return (
                 <TableRow key={job.id}>
                   <TableCell>
