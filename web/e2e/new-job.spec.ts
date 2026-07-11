@@ -30,7 +30,11 @@ test.describe("new job", () => {
     // spawning the real pipeline.
     expect(job.status).toBe("processing");
 
-    await expect(page.getByText(`Job ${jobId}`)).toBeVisible();
+    // Real job-live page (W8), not the old placeholder -- STUB_WORKER's
+    // status flip (processing/ingest/0) is visible via the humanized stage
+    // label and the pre-clips empty state.
+    await expect(page.getByText("Downloading")).toBeVisible();
+    await expect(page.getByText("Working on your clips…")).toBeVisible();
   });
 
   test("rejects a non-URL, non-file submission client-side", async ({ page }) => {

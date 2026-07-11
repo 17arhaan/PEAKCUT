@@ -1,8 +1,6 @@
-import type { ComponentProps } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,23 +17,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { JobStatusBadge } from "@/components/job-status-badge";
 import { getJobsForUser, getUserBalance } from "@/lib/data";
 import type { jobs as jobsTable } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
 
 type Job = typeof jobsTable.$inferSelect;
-type BadgeVariant = NonNullable<ComponentProps<typeof Badge>["variant"]>;
-
-const STATUS_BADGE: Record<Job["status"], { label: string; variant: BadgeVariant; className?: string }> = {
-  queued: { label: "Queued", variant: "secondary" },
-  processing: { label: "Processing", variant: "default" },
-  done: {
-    label: "Done",
-    variant: "outline",
-    className: "border-green-600/30 bg-green-600/10 text-green-700 dark:text-green-400",
-  },
-  failed: { label: "Failed", variant: "destructive" },
-};
 
 function jobSource(job: Job): string {
   if (job.sourceType === "upload") return "Upload";
@@ -89,29 +76,24 @@ export default async function DashboardPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {userJobs.map((job) => {
-              const badge = STATUS_BADGE[job.status] ?? { label: job.status, variant: "secondary" as const };
-              return (
-                <TableRow key={job.id}>
-                  <TableCell>
-                    <Link href={`/jobs/${job.id}`} className="inline-flex">
-                      <Badge variant={badge.variant} className={badge.className}>
-                        {badge.label}
-                      </Badge>
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/jobs/${job.id}`} className="hover:underline">
-                      {jobSource(job)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatRelativeTime(job.createdAt)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{jobDurationCost(job)}</TableCell>
-                </TableRow>
-              );
-            })}
+            {userJobs.map((job) => (
+              <TableRow key={job.id}>
+                <TableCell>
+                  <Link href={`/jobs/${job.id}`} className="inline-flex">
+                    <JobStatusBadge status={job.status} />
+                  </Link>
+                </TableCell>
+                <TableCell>
+                  <Link href={`/jobs/${job.id}`} className="hover:underline">
+                    {jobSource(job)}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatRelativeTime(job.createdAt)}
+                </TableCell>
+                <TableCell className="text-muted-foreground">{jobDurationCost(job)}</TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       )}
