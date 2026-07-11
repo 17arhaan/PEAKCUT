@@ -1,5 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Loads the same DATABASE_URL/AUTH_SECRET/AUTH_DEV that `next dev` picks up
+// on its own, so specs can import "@/lib/db" directly to seed rows. Next.js
+// loads .env.local for the webServer child process regardless; this just
+// gives the Playwright test process (a separate node process) the same env.
+try {
+  process.loadEnvFile(".env.local");
+} catch {
+  // No .env.local (e.g. CI injects env vars directly) — nothing to load.
+}
+
 const PORT = 3100;
 const baseURL = `http://localhost:${PORT}`;
 
@@ -8,6 +18,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // webServer is a single dev-mode (Turbopack, uncompiled routes) Next
+  // process shared by every worker — more than ~2-3 concurrent sign-ins
+  // starves it and the credentials flow times out. Caps parallelism rather
+  // than raising test timeouts to paper over it.
+  workers: 2,
   reporter: "list",
   use: {
     baseURL,
