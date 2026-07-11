@@ -11,11 +11,23 @@ run in its own tmp_path.
 
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
 from conftest import fixture
-from shorts.pipeline import render_style, run
+from shorts.pipeline import (
+    _clip_entry,
+    _load_cuts_checkpoint,
+    _load_media_checkpoint,
+    _load_scored_checkpoint,
+    _write_cuts_checkpoint,
+    _write_media_checkpoint,
+    _write_scored_checkpoint,
+    render_style,
+    run,
+)
+from shorts.types import Candidate, Cut, MediaInfo, Scored, SourceMedia
 
 _REQUIRED_TOP_LEVEL = {
     "version", "pipeline_version", "source", "duration_processed_s",
@@ -166,3 +178,73 @@ def test_resume_is_full_no_op_when_nothing_deleted(tmp_path):
         "ingest": 0.0, "signals": 0.0, "crew": 0.0, "render": 0.0,
     }
     assert run_json_after["clips"] == run_json_before["clips"]
+
+
+# --- source fingerprint (review finding 1) + tolerant loaders (finding 2) --
+# Unit-level: no whisper/ffmpeg, checkpoint loaders exercised directly --
+# per the task brief, the fast path is preferred over a second full
+# pipeline run just to prove content-swap detection.
+
+
+def _fake_media(tmp_path, video_bytes: bytes) -> tuple[SourceMedia, Path]:
+    video = tmp_path / "src.mp4"
+    video.write_bytes(video_bytes)
+    wav = tmp_path / "audio.wav"
+    wav.write_bytes(b"wav")
+    media = SourceMedia(video=video, wav16k=wav, info=MediaInfo(duration_s=10.0, fps=30.0, width=1920, height=1080))
+    return media, video
+
+
+def test_media_checkpoint_discards_on_content_swap(tmp_path, capsys):
+    """A media.json checkpoint written against one file's content must be
+    discarded (None -- stage regenerates) once different content lands at
+    the SAME source path, even though the source string is unchanged."""
+    media, video = _fake_media(tmp_path, b"a" * 100)
+    _write_media_checkpoint(tmp_path, str(video), media)
+
+    assert _load_media_checkpoint(tmp_path, str(video)) is not None
+
+    video.write_bytes(b"b" * 999)  # different content, same path
+    assert _load_media_checkpoint(tmp_path, str(video)) is None
+    assert "discarding media.json" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad_json", ["null", "[]", "42"])
+def test_media_checkpoint_tolerates_wrong_shape(tmp_path, bad_json):
+    (tmp_path / "media.json").write_text(bad_json)
+    assert _load_media_checkpoint(tmp_path, "some-source") is None
+
+
+@pytest.mark.parametrize("bad_json", ["null", "[]", "42"])
+def test_scored_checkpoint_tolerates_wrong_shape(tmp_path, bad_json):
+    (tmp_path / "scored.json").write_text(bad_json)
+    assert _load_scored_checkpoint(tmp_path, "some-source", "fp") is None
+
+
+@pytest.mark.parametrize("bad_json", ["null", "[]", "42"])
+def test_cuts_checkpoint_tolerates_wrong_shape(tmp_path, bad_json):
+    (tmp_path / "cuts.json").write_text(bad_json)
+    assert _load_cuts_checkpoint(tmp_path, "some-source", "fp") is None
+
+
+def test_scored_checkpoint_discards_on_fingerprint_mismatch(tmp_path):
+    """scored.json carries the same content fingerprint as media.json --
+    even though its own `source` string still matches, a fingerprint that
+    no longer matches THIS call's validated media (e.g. media.json itself
+    already caught a content swap and regenerated) discards it too."""
+    candidate = Candidate(t0=0.0, t1=5.0, source="test", evidence=[])
+    scored = Scored(candidate=candidate, total=10, components={}, verdict="keep")
+    _write_scored_checkpoint(tmp_path, "src", "fp-old", [scored])
+
+    assert _load_scored_checkpoint(tmp_path, "src", "fp-old") is not None
+    assert _load_scored_checkpoint(tmp_path, "src", "fp-new") is None
+
+
+def test_cuts_checkpoint_discards_on_fingerprint_mismatch(tmp_path):
+    candidate = Candidate(t0=0.0, t1=5.0, source="test", evidence=[])
+    cut = Cut(t0=0.0, t1=5.0)
+    entry = _clip_entry(1, candidate, cut, None, None, None, [], None, None, None)
+    _write_cuts_checkpoint(tmp_path, "src", "fp-old", [entry])
+
+    assert _load_cuts_checkpoint(tmp_path, "src", "fp-old") is not None
+    assert _load_cuts_checkpoint(tmp_path, "src", "fp-new") is None

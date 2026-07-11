@@ -8,9 +8,11 @@ artifact already exists and validates for the SAME source (this is the
 Modal-retry story: a stage function can crash/retry freely, the next
 attempt resumes instead of redoing expensive work). Source identity is
 guarded per-artifact (media.json/scored.json/cuts.json each carry their own
-"source" field, checked against the current call's `source` argument) so a
-workdir accidentally reused for a different video never silently mixes
-stale checkpoints with fresh ones -- see _load_media_checkpoint et al.
+"source" field, checked against the current call's `source` argument, PLUS
+a cheap size+mtime "fingerprint" of the resolved video file -- see
+_source_fingerprint) so a workdir accidentally reused for a different video,
+or the SAME path silently swapped to different content, never mixes stale
+checkpoints with fresh ones -- see _load_media_checkpoint et al.
 `signals.json` itself carries no source field (index.save/load's schema is
 reused as-is, untouched); its reuse is instead gated on media.json having
 already proven a source match THIS call (see run()) -- equivalent
@@ -211,6 +213,27 @@ def _clip_result_from_entry(entry: dict) -> ClipResult:
 # --- stage checkpoints ------------------------------------------------------
 
 
+def _source_fingerprint(path: Path) -> str:
+    """Cheap (no hashing) content identity for `path` -- size+mtime, since
+    this runs on every checkpoint load and has to stay free. For a local
+    source, `path` IS the source file, so this changes the instant someone
+    swaps different content in at the same path (finding: string equality
+    alone can't see that). For a URL source there's nothing local to stat
+    BEFORE the download (that's the whole point of resuming), so `path` is
+    instead the already-downloaded video file -- this proves a later load
+    still points at the exact bytes this checkpoint was written against."""
+    st = path.stat()
+    return f"{st.st_size}:{int(st.st_mtime)}"
+
+
+def _discard(path: Path, reason: str) -> None:
+    """Every checkpoint-discard branch below funnels through here so a
+    stale/malformed artifact says WHY it's being regenerated instead of
+    silently vanishing -- one-line, same style as cli.py's [ok]/[FAIL]."""
+    print(f"[pipeline] discarding {path.name}: {reason}")
+    return None
+
+
 def _media_checkpoint_path(out_dir: Path) -> Path:
     return out_dir / "media.json"
 
@@ -219,6 +242,7 @@ def _write_media_checkpoint(out_dir: Path, source: str, media: SourceMedia) -> N
     data = {
         "version": CHECKPOINT_VERSION,
         "source": source,
+        "fingerprint": _source_fingerprint(media.video),
         "video": str(media.video),
         "wav16k": str(media.wav16k),
         "info": {
@@ -231,8 +255,9 @@ def _write_media_checkpoint(out_dir: Path, source: str, media: SourceMedia) -> N
 
 def _load_media_checkpoint(out_dir: Path, source: str) -> SourceMedia | None:
     """The ingest-stage checkpoint. None (stage must rerun) if missing,
-    unparseable, from a different source, or its referenced video/wav
-    files no longer exist on disk."""
+    unparseable/wrong-shape, from a different source, its content
+    fingerprint no longer matches (same path, swapped content), or its
+    referenced video/wav files no longer exist on disk."""
     path = _media_checkpoint_path(out_dir)
     if not path.exists():
         return None
@@ -240,12 +265,16 @@ def _load_media_checkpoint(out_dir: Path, source: str) -> SourceMedia | None:
         data = json.loads(path.read_text())
     except json.JSONDecodeError:
         return None
+    if not isinstance(data, dict):
+        return _discard(path, "checkpoint is valid JSON but not an object")
     if data.get("version") != CHECKPOINT_VERSION or data.get("source") != source:
         return None
     video, wav = Path(data.get("video", "")), Path(data.get("wav16k", ""))
     info_d = data.get("info")
     if not video.exists() or not wav.exists() or not isinstance(info_d, dict):
         return None
+    if _source_fingerprint(video) != data.get("fingerprint"):
+        return _discard(path, "source content changed since this checkpoint was written")
     try:
         info = MediaInfo(
             duration_s=info_d["duration_s"], fps=info_d["fps"],
@@ -266,7 +295,7 @@ def _load_signals_checkpoint(out_dir: Path):
         return None
     try:
         return load_signal_index(path)
-    except (json.JSONDecodeError, ValueError, KeyError):
+    except (json.JSONDecodeError, ValueError, KeyError, AttributeError, TypeError):
         return None
 
 
@@ -274,10 +303,11 @@ def _scored_checkpoint_path(out_dir: Path) -> Path:
     return out_dir / "scored.json"
 
 
-def _write_scored_checkpoint(out_dir: Path, source: str, keepers: list[Scored]) -> None:
+def _write_scored_checkpoint(out_dir: Path, source: str, fingerprint: str, keepers: list[Scored]) -> None:
     data = {
         "version": CHECKPOINT_VERSION,
         "source": source,
+        "fingerprint": fingerprint,
         "keepers": [
             {"candidate": _candidate_json(s.candidate), **_scored_json(s)} for s in keepers
         ],
@@ -285,13 +315,18 @@ def _write_scored_checkpoint(out_dir: Path, source: str, keepers: list[Scored]) 
     _scored_checkpoint_path(out_dir).write_text(json.dumps(data, indent=2))
 
 
-def _load_scored_checkpoint(out_dir: Path, source: str) -> list[Scored] | None:
+def _load_scored_checkpoint(out_dir: Path, source: str, fingerprint: str) -> list[Scored] | None:
     """The crew-stage checkpoint. `candidates.json` is deliberately not a
     separate artifact -- Scout<->Critic (orchestrator.run_crew) is one
     bounded, atomic debate with no useful mid-loop resume point, and every
     kept Scored already embeds its own Candidate, so a second file would
-    just be redundant. None (stage must rerun) if missing/unparseable/from
-    a different source."""
+    just be redundant. None (stage must rerun) if missing/unparseable/
+    wrong-shape, from a different source, or its fingerprint doesn't match
+    THIS call's already-validated media (`fingerprint` is media.json's own
+    fingerprint, recomputed by the caller -- not re-derived here -- so a
+    scored.json left over from a content swap that media.json already
+    caught and regenerated for gets caught too, even though its `source`
+    string still matches)."""
     path = _scored_checkpoint_path(out_dir)
     if not path.exists():
         return None
@@ -299,8 +334,12 @@ def _load_scored_checkpoint(out_dir: Path, source: str) -> list[Scored] | None:
         data = json.loads(path.read_text())
     except json.JSONDecodeError:
         return None
+    if not isinstance(data, dict):
+        return _discard(path, "checkpoint is valid JSON but not an object")
     if data.get("version") != CHECKPOINT_VERSION or data.get("source") != source:
         return None
+    if data.get("fingerprint") != fingerprint:
+        return _discard(path, "source content changed since this checkpoint was written")
     raw = data.get("keepers")
     if not isinstance(raw, list):
         return None
@@ -314,15 +353,19 @@ def _cuts_checkpoint_path(out_dir: Path) -> Path:
     return out_dir / "cuts.json"
 
 
-def _load_cuts_checkpoint(out_dir: Path, source: str) -> tuple[list[ClipResult], list[dict]] | None:
+def _load_cuts_checkpoint(
+    out_dir: Path, source: str, fingerprint: str
+) -> tuple[list[ClipResult], list[dict]] | None:
     """The cuts+render+qa+repair-stage checkpoint. Persists the FINAL,
     post-repair state (repairs mutate the cut BEFORE this is written --
     cuts.json is only ever written once the per-clip repair loop has
     already settled, so a later render/resume never has to replay repair
     logic, just load the result verbatim). None (stage must rerun) if
-    missing/unparseable/from a different source, or if any referenced
-    clip mp4 no longer exists on disk (the clips/ artifact half of this
-    checkpoint)."""
+    missing/unparseable/wrong-shape, from a different source, its
+    fingerprint doesn't match THIS call's already-validated media (see
+    _load_scored_checkpoint's docstring -- same reasoning), or if any
+    referenced clip mp4 no longer exists on disk (the clips/ artifact half
+    of this checkpoint)."""
     path = _cuts_checkpoint_path(out_dir)
     if not path.exists():
         return None
@@ -330,8 +373,12 @@ def _load_cuts_checkpoint(out_dir: Path, source: str) -> tuple[list[ClipResult],
         data = json.loads(path.read_text())
     except json.JSONDecodeError:
         return None
+    if not isinstance(data, dict):
+        return _discard(path, "checkpoint is valid JSON but not an object")
     if data.get("version") != CHECKPOINT_VERSION or data.get("source") != source:
         return None
+    if data.get("fingerprint") != fingerprint:
+        return _discard(path, "source content changed since this checkpoint was written")
     entries = data.get("clips")
     if not isinstance(entries, list):
         return None
@@ -348,8 +395,8 @@ def _load_cuts_checkpoint(out_dir: Path, source: str) -> tuple[list[ClipResult],
     return results, entries
 
 
-def _write_cuts_checkpoint(out_dir: Path, source: str, entries: list[dict]) -> None:
-    data = {"version": CHECKPOINT_VERSION, "source": source, "clips": entries}
+def _write_cuts_checkpoint(out_dir: Path, source: str, fingerprint: str, entries: list[dict]) -> None:
+    data = {"version": CHECKPOINT_VERSION, "source": source, "fingerprint": fingerprint, "clips": entries}
     _cuts_checkpoint_path(out_dir).write_text(json.dumps(data, indent=2))
 
 
@@ -460,6 +507,13 @@ def run(source: str | Path, out_dir: Path) -> list[ClipResult]:
         _write_media_checkpoint(out_dir, source_id, media)
         timings["ingest"] = time.monotonic() - t0
 
+    # This call's validated content identity -- computed once, off the NOW-
+    # validated `media` (whether reused or freshly resolved this call), and
+    # threaded into every later stage's checkpoint check. That's what lets
+    # scored.json/cuts.json catch a content swap even though their own
+    # `source` string still matches: their fingerprint won't match media's.
+    fingerprint = _source_fingerprint(media.video)
+
     # Stage 2: signals (transcribe + full signal index). Only consulted
     # when media was ITSELF reused this call -- a freshly (re)resolved
     # media means the source changed or the checkpoint was stale, so any
@@ -479,7 +533,7 @@ def run(source: str | Path, out_dir: Path) -> list[ClipResult]:
         return []
 
     # Stage 3: crew (Scout<->Critic bounded debate -> scored keepers).
-    cached_keepers = _load_scored_checkpoint(out_dir, source_id)
+    cached_keepers = _load_scored_checkpoint(out_dir, source_id, fingerprint)
     if cached_keepers is not None:
         keepers = cached_keepers[:MAX_CLIPS]
         timings["crew"] = 0.0
@@ -490,18 +544,18 @@ def run(source: str | Path, out_dir: Path) -> list[ClipResult]:
         # empty, best-effort list even on quiet content; this just caps
         # what we render.
         keepers = run_crew(index, log)[:MAX_CLIPS]
-        _write_scored_checkpoint(out_dir, source_id, keepers)
+        _write_scored_checkpoint(out_dir, source_id, fingerprint, keepers)
         timings["crew"] = time.monotonic() - t0
 
     # Stage 4: per-clip surgeon -> hook -> render -> qa -> repair.
-    cached_cuts = _load_cuts_checkpoint(out_dir, source_id)
+    cached_cuts = _load_cuts_checkpoint(out_dir, source_id, fingerprint)
     if cached_cuts is not None:
         results, entries = cached_cuts
         timings["render"] = 0.0
     else:
         t0 = time.monotonic()
         results, entries = _process_clips(keepers, media, index, out_dir, log)
-        _write_cuts_checkpoint(out_dir, source_id, entries)
+        _write_cuts_checkpoint(out_dir, source_id, fingerprint, entries)
         timings["render"] = time.monotonic() - t0
 
     _write_run_json(out_dir, source_id, media, entries, log, timings)
