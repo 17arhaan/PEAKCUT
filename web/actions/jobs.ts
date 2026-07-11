@@ -70,8 +70,22 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
   const jobId = crypto.randomUUID();
   const outDir = path.join(WORK_ROOT, jobId);
 
+  // Debit and job-row insert MUST commit or roll back together: if the
+  // insert fails (PK collision, transient DB error) after a standalone
+  // debit had already committed, the charge would be stranded -- balance
+  // down, no job row to hang a refund off. One transaction closes that gap.
   try {
-    await debit(userId, ESTIMATE_MINUTES, jobId);
+    await db.transaction(async (tx) => {
+      await debit(userId, ESTIMATE_MINUTES, jobId, tx);
+      await tx.insert(jobs).values({
+        id: jobId,
+        userId,
+        sourceType,
+        sourceUrl: sourceType === "url" ? source : null,
+        r2Key: sourceType === "upload" ? source : null,
+        status: "queued",
+      });
+    });
   } catch (err) {
     if (err instanceof InsufficientCreditsError) {
       throw new Error(
@@ -80,15 +94,6 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
     }
     throw err;
   }
-
-  await db.insert(jobs).values({
-    id: jobId,
-    userId,
-    sourceType,
-    sourceUrl: sourceType === "url" ? source : null,
-    r2Key: sourceType === "upload" ? source : null,
-    status: "queued",
-  });
 
   try {
     await worker.start({ id: jobId, source, outDir });

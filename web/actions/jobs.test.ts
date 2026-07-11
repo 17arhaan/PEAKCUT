@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
@@ -9,7 +9,7 @@ vi.mock("@/lib/worker", () => ({ worker: { start: vi.fn().mockResolvedValue(unde
 
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { jobs, users } from "@/lib/db/schema";
+import { creditLedger, jobs, users } from "@/lib/db/schema";
 import { worker } from "@/lib/worker";
 import { balance } from "@/lib/credits";
 import { createJob } from "./jobs";
@@ -164,5 +164,50 @@ describe("createJob", () => {
     expect(await balance(poorUserId)).toBe(10); // untouched
 
     await db.delete(users).where(eq(users.id, poorUserId));
+  });
+
+  // W9 money-leak: debit and the job-row insert used to be two separate,
+  // un-transacted statements -- a failure in the insert left the debit
+  // committed with no job row to hang a refund off (stranded charge). Force
+  // the insert to fail (pre-seed a jobs row at the UUID crypto.randomUUID()
+  // is about to hand back, so the PK collides) and prove the whole thing
+  // rolls back: no charge, no orphan ledger row, createJob rejects.
+  it("ATOMICITY: job-insert failure rolls back the debit -- no stranded charge", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+    const balanceBefore = await balance(userId);
+
+    const collidingJobId = crypto.randomUUID();
+    await db.insert(jobs).values({
+      id: collidingJobId,
+      userId,
+      sourceType: "url",
+      sourceUrl: "https://youtube.com/watch?v=preexisting",
+      status: "queued",
+    });
+
+    const uuidSpy = vi.spyOn(crypto, "randomUUID").mockReturnValue(collidingJobId as `${string}-${string}-${string}-${string}-${string}`);
+
+    try {
+      await expect(
+        createJob({ source: "https://youtube.com/watch?v=collision", sourceType: "url" }),
+      ).rejects.toThrow();
+    } finally {
+      uuidSpy.mockRestore();
+    }
+
+    expect(mockWorkerStart).not.toHaveBeenCalled();
+
+    // Charge rolled back -- balance untouched by the failed attempt.
+    expect(await balance(userId)).toBe(balanceBefore);
+
+    // No orphan job_debit ledger row for the colliding jobId (the debit's
+    // own ledger insert rolled back along with the failed job insert).
+    const ledgerRows = await db
+      .select()
+      .from(creditLedger)
+      .where(and(eq(creditLedger.reason, "job_debit"), eq(creditLedger.ref, collidingJobId)));
+    expect(ledgerRows).toHaveLength(0);
+
+    await db.delete(jobs).where(eq(jobs.id, collidingJobId));
   });
 });

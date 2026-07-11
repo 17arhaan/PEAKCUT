@@ -179,6 +179,9 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
   // import problem, and must never retroactively flip an already-committed
   // 'done' job back to 'failed'.
   try {
+    // durationMin null (duration_processed_s missing) reconciles to 0 --
+    // deliberate policy: a done job with no measured usage is refunded in
+    // full rather than charged the estimate for unmeasured work.
     await reconcile(userId, jobId, durationMin ?? 0);
   } catch (err) {
     console.error(`[job ${jobId}] reconcile error:`, err);

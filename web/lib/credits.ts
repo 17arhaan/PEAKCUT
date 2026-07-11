@@ -68,35 +68,47 @@ export async function grantSignup(userId: string, tx: Db = db): Promise<void> {
  * before deciding whether it still qualifies. If the guard fails, we throw
  * and the whole tx (including the ledger insert) rolls back -- no orphaned
  * ledger row, no balance change.
+ *
+ * Takes an optional `tx`, same style as grantSignup: pass one in to have the
+ * debit participate in a caller's own transaction (e.g. jobs.ts wants the
+ * debit and the job-row insert to commit or roll back together). With no
+ * `tx`, debit opens its own transaction so it's still atomic standalone.
  */
-export async function debit(userId: string, minutes: number, jobId: string): Promise<{ balance: number }> {
+export async function debit(
+  userId: string,
+  minutes: number,
+  jobId: string,
+  tx?: Db,
+): Promise<{ balance: number }> {
   const m = Math.round(minutes);
 
-  return db.transaction(async (tx) => {
-    const [ledgerRow] = await tx
+  const run = async (t: Db): Promise<{ balance: number }> => {
+    const [ledgerRow] = await t
       .insert(creditLedger)
       .values({ userId, deltaMinutes: -m, reason: JOB_DEBIT_REASON, ref: jobId })
       .onConflictDoNothing({ target: [creditLedger.reason, creditLedger.ref] })
       .returning();
 
     if (!ledgerRow) {
-      const [row] = await tx.select({ balance: users.minutesBalance }).from(users).where(eq(users.id, userId));
+      const [row] = await t.select({ balance: users.minutesBalance }).from(users).where(eq(users.id, userId));
       return { balance: row?.balance ?? 0 };
     }
 
-    const [updated] = await tx
+    const [updated] = await t
       .update(users)
       .set({ minutesBalance: sql`${users.minutesBalance} - ${m}` })
       .where(and(eq(users.id, userId), gte(users.minutesBalance, m)))
       .returning({ balance: users.minutesBalance });
 
     if (!updated) {
-      const [row] = await tx.select({ balance: users.minutesBalance }).from(users).where(eq(users.id, userId));
+      const [row] = await t.select({ balance: users.minutesBalance }).from(users).where(eq(users.id, userId));
       throw new InsufficientCreditsError(row?.balance ?? 0, m);
     }
 
     return { balance: updated.balance };
-  });
+  };
+
+  return tx ? run(tx) : db.transaction(run);
 }
 
 /**
@@ -135,14 +147,22 @@ export async function refund(
   });
 }
 
-/** Reads the estimate (whole minutes) that was originally debited for jobId, or 0 if none. */
+/**
+ * Reads the estimate (whole minutes) that was originally debited for jobId,
+ * or 0 if none. UNIQUE(reason, ref) means at most one job_debit row can
+ * ever exist for a jobId -- the orderBy + limit(1) just makes that "one
+ * debit per job" invariant explicit at the call site instead of relying on
+ * the destructure to quietly pick whichever row Postgres returns first.
+ */
 async function estimateFor(tx: Db, userId: string, jobId: string): Promise<number> {
   const [row] = await tx
     .select({ delta: creditLedger.deltaMinutes })
     .from(creditLedger)
     .where(
       and(eq(creditLedger.userId, userId), eq(creditLedger.reason, JOB_DEBIT_REASON), eq(creditLedger.ref, jobId)),
-    );
+    )
+    .orderBy(creditLedger.createdAt)
+    .limit(1);
   return row ? Math.round(-row.delta) : 0;
 }
 
@@ -195,8 +215,14 @@ export async function reconcile(userId: string, jobId: string, actualMinutes: nu
 
     if (applied === 0) {
       // Capped away to nothing (e.g. no balance left to take the extra
-      // debit from) -- no ledger noise for a correction that changes
-      // nothing.
+      // debit from) -- balance doesn't move, but still write a zero-delta
+      // job_reconcile row (idempotent on the same (reason, ref) as a real
+      // correction) so "ledger is truth" holds: a reconciled job always has
+      // a ledger trace, even when the correction nets to nothing.
+      await tx
+        .insert(creditLedger)
+        .values({ userId, deltaMinutes: 0, reason: JOB_RECONCILE_REASON, ref: jobId })
+        .onConflictDoNothing({ target: [creditLedger.reason, creditLedger.ref] });
       return { balance: currentBalance };
     }
 
