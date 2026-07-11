@@ -12,9 +12,10 @@ from shorts import qa
 from shorts.agent_log import AgentLog
 from shorts.agents.orchestrator import run_crew
 from shorts.agents.scout import fallback_candidates as _fallback_candidates
+from shorts.agents.surgeon import refine as surgeon_refine
 from shorts.render.renderer import render_clip
 from shorts.signals.index import build_signal_index, save as save_signal_index
-from shorts.types import Claim, ClipResult, Cut, Scored, SourceMedia
+from shorts.types import Claim, ClipResult, Scored, SourceMedia
 from shorts.ffmpeg import extract_wav, probe
 
 MAX_CLIPS = 4
@@ -53,7 +54,7 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
     run_entries = []
     for i, scored in enumerate(keepers, start=1):
         candidate = scored.candidate
-        cut = Cut(t0=candidate.t0, t1=candidate.t1)
+        cut = surgeon_refine(candidate, index, log)
         mp4, thumb = render_clip(
             source, cut, index, None, DEFAULT_STYLE, out_dir / f"clip_{i:03d}"
         )
@@ -72,8 +73,13 @@ def run(source: Path, out_dir: Path) -> list[ClipResult]:
         run_entries.append(
             {
                 "mp4": str(result.mp4),
-                "t0": result.cut.t0,
-                "t1": result.cut.t1,
+                "t0": candidate.t0,
+                "t1": candidate.t1,
+                "cut": {
+                    "t0": result.cut.t0,
+                    "t1": result.cut.t1,
+                    "payoff_word_i": result.cut.payoff_word_i,
+                },
                 "source": candidate.source,
                 "evidence": [_claim_json(cl) for cl in candidate.evidence],
                 "score": {
