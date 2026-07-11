@@ -1,0 +1,308 @@
+{
+  "version": 1,
+  "pipeline_version": "0.1.0",
+  "source": {
+    "input": "tests/fixtures/real_talking_head.mp4",
+    "duration_s": 75.008267,
+    "fps": 29.97002997002997,
+    "width": 854,
+    "height": 480
+  },
+  "duration_processed_s": 75.008267,
+  "agent_totals": {
+    "scout": {
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_cents": 0.0
+    },
+    "critic": {
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_cents": 0.0
+    },
+    "orchestrator": {
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_cents": 0.0
+    },
+    "surgeon": {
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_cents": 0.0
+    },
+    "qa": {
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_cents": 0.0
+    }
+  },
+  "timings_s": {
+    "ingest": 0.24973391700768843,
+    "signals": 37.27137262499309,
+    "crew": 0.0007864170038374141,
+    "render": 39.90255033399444
+  },
+  "clips": [
+    {
+      "index": 1,
+      "candidate": {
+        "t0": 0.0,
+        "t1": 18.75206675,
+        "source": "fallback",
+        "notes": "",
+        "evidence": []
+      },
+      "cut": {
+        "t0": 0.0,
+        "t1": 18.94,
+        "payoff_word_i": null
+      },
+      "score": {
+        "total": 0,
+        "verdict": "borderline",
+        "components": {
+          "hook_strength": {
+            "score": 0,
+            "evidence": []
+          },
+          "payoff": {
+            "score": 0,
+            "evidence": []
+          },
+          "emotion": {
+            "score": 0,
+            "evidence": []
+          },
+          "quotability": {
+            "score": 0,
+            "evidence": []
+          }
+        }
+      },
+      "hook": {
+        "title": "Novelist, Essayist And Philosopher, Rona",
+        "captions": {
+          "tiktok": "Novelist, essayist and philosopher, Ronald Wright is the author of a profound little book with the deeply ironic title, A Short History of\u2026",
+          "reels": "Novelist, essayist and philosopher, Ronald Wright is the author of a profound little book with the deeply ironic title, A\u2026",
+          "shorts": "Novelist, essayist and philosopher, Ronald Wright is the author of a profound little book with\u2026"
+        }
+      },
+      "qa": {
+        "passed": true,
+        "failures": []
+      },
+      "repairs": [],
+      "dropped_reason": null,
+      "paths": {
+        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_001/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_001/thumb.jpg"
+      }
+    },
+    {
+      "index": 2,
+      "candidate": {
+        "t0": 19.91146662499999,
+        "t1": 38.663533374999986,
+        "source": "fallback",
+        "notes": "",
+        "evidence": []
+      },
+      "cut": {
+        "t0": 19.88,
+        "t1": 37.46,
+        "payoff_word_i": null
+      },
+      "score": {
+        "total": 0,
+        "verdict": "borderline",
+        "components": {
+          "hook_strength": {
+            "score": 0,
+            "evidence": []
+          },
+          "payoff": {
+            "score": 0,
+            "evidence": []
+          },
+          "emotion": {
+            "score": 0,
+            "evidence": []
+          },
+          "quotability": {
+            "score": 0,
+            "evidence": []
+          }
+        }
+      },
+      "hook": {
+        "title": "A Kind Of Hope That'S, Quote",
+        "captions": {
+          "tiktok": "a kind of hope that's, quote, clear -sighted and informed and inspires people to wise and necessary action, however difficult. You know, my\u2026",
+          "reels": "a kind of hope that's, quote, clear -sighted and informed and inspires people to wise and necessary action, however\u2026",
+          "shorts": "a kind of hope that's, quote, clear -sighted and informed and inspires people to wise and\u2026"
+        }
+      },
+      "qa": {
+        "passed": false,
+        "failures": [
+          {
+            "code": "BLACK",
+            "detail": "1 black span(s): [Span(t0=7.741067, t1=8.241567)]"
+          }
+        ]
+      },
+      "repairs": [
+        {
+          "attempt": 1,
+          "codes": [
+            "ALIGN",
+            "BLACK"
+          ],
+          "route": "surgeon",
+          "outcome": "failed"
+        },
+        {
+          "attempt": 2,
+          "codes": [
+            "BLACK"
+          ],
+          "route": "render",
+          "outcome": "failed"
+        }
+      ],
+      "dropped_reason": "BLACK",
+      "paths": {
+        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_002/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_002/thumb.jpg"
+      }
+    },
+    {
+      "index": 3,
+      "candidate": {
+        "t0": 38.13646662499998,
+        "t1": 56.88853337499998,
+        "source": "fallback",
+        "notes": "",
+        "evidence": []
+      },
+      "cut": {
+        "t0": 38.92,
+        "t1": 57.04,
+        "payoff_word_i": null
+      },
+      "score": {
+        "total": 0,
+        "verdict": "borderline",
+        "components": {
+          "hook_strength": {
+            "score": 0,
+            "evidence": []
+          },
+          "payoff": {
+            "score": 0,
+            "evidence": []
+          },
+          "emotion": {
+            "score": 0,
+            "evidence": []
+          },
+          "quotability": {
+            "score": 0,
+            "evidence": []
+          }
+        }
+      },
+      "hook": {
+        "title": "And Even Before We Had What",
+        "captions": {
+          "tiktok": "and even before we had what archaeologists call a civilization, which essentially is a settled society with an agricultural base and governments\u2026",
+          "reels": "and even before we had what archaeologists call a civilization, which essentially is a settled society with an\u2026",
+          "shorts": "and even before we had what archaeologists call a civilization, which essentially is a settled\u2026"
+        }
+      },
+      "qa": {
+        "passed": true,
+        "failures": []
+      },
+      "repairs": [
+        {
+          "attempt": 1,
+          "codes": [
+            "ALIGN"
+          ],
+          "route": "surgeon",
+          "outcome": "fixed"
+        }
+      ],
+      "dropped_reason": null,
+      "paths": {
+        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_003/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_003/thumb.jpg"
+      }
+    },
+    {
+      "index": 4,
+      "candidate": {
+        "t0": 55.66146662499998,
+        "t1": 74.41353337499999,
+        "source": "fallback",
+        "notes": "",
+        "evidence": []
+      },
+      "cut": {
+        "t0": 55.36,
+        "t1": 65.18,
+        "payoff_word_i": null
+      },
+      "score": {
+        "total": 0,
+        "verdict": "borderline",
+        "components": {
+          "hook_strength": {
+            "score": 0,
+            "evidence": []
+          },
+          "payoff": {
+            "score": 0,
+            "evidence": []
+          },
+          "emotion": {
+            "score": 0,
+            "evidence": []
+          },
+          "quotability": {
+            "score": 0,
+            "evidence": []
+          }
+        }
+      },
+      "hook": {
+        "title": "The Paleolithic Hunters Perfected Their",
+        "captions": {
+          "tiktok": "the Paleolithic hunters perfected their art of hunting, you see the same pattern of a rapid increase in wealth and prosperity in numbers caused by\u2026",
+          "reels": "the Paleolithic hunters perfected their art of hunting, you see the same pattern of a rapid increase in wealth and\u2026",
+          "shorts": "the Paleolithic hunters perfected their art of hunting, you see the same pattern of a rapid\u2026"
+        }
+      },
+      "qa": {
+        "passed": true,
+        "failures": []
+      },
+      "repairs": [
+        {
+          "attempt": 1,
+          "codes": [
+            "ALIGN"
+          ],
+          "route": "surgeon",
+          "outcome": "fixed"
+        }
+      ],
+      "dropped_reason": null,
+      "paths": {
+        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_004/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_004/thumb.jpg"
+      }
+    }
+  ]
+}
