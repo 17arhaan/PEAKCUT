@@ -13,7 +13,13 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   const { callbackUrl: callbackUrlParam } = await searchParams;
   const devEnabled = env.AUTH_DEV === "1";
   const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
-  const callbackUrl = callbackUrlParam || "/dashboard";
+
+  // open-redirect guard: relative same-origin paths only
+  const raw = callbackUrlParam ?? "";
+  const callbackUrl =
+    typeof raw === "string" && raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\")
+      ? raw
+      : "/dashboard";
 
   return (
     <div className="flex flex-1 items-center justify-center p-6">
