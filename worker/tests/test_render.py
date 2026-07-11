@@ -140,6 +140,42 @@ def test_render_clip_on_screenshare_no_faces_center_crop_no_crash(tmp_path):
     assert _crop_geometry(info.width, info.height, None) == (expected_crop_w, info.height, expected_x, 0)
 
 
+def test_render_clip_captions_are_rebased_to_clip_relative_time(tmp_path):
+    """Regression for the caption-timestamp bug: idx.words carry absolute
+    source timestamps, but the rendered clip's own timeline starts at 0
+    (ffmpeg -ss trim). A cut starting well past 0 (t0=38) must still
+    produce karaoke Dialogue lines starting near 0, not near 38 -- the
+    latter would place captions after the clip has already ended."""
+    video = fixture("real_talking_head.mp4")
+    info = probe(video)
+    idx = _mk_index(
+        media=info,
+        words=[
+            Word(text="hello", t0=38.5, t1=38.8, conf=0.9),
+            Word(text="world", t0=39.0, t1=39.3, conf=0.9),
+            Word(text="this", t0=39.4, t1=39.6, conf=0.9),
+        ],
+    )
+    cut = Cut(t0=38.0, t1=50.0)
+
+    mp4, _thumb = render_clip(video, cut, idx, None, "s1", tmp_path / "clip_001")
+
+    clip_duration = cut.t1 - cut.t0
+    ass_text = (tmp_path / "clip_001" / "clip.ass").read_text()
+    starts = [
+        float(m.group(1)) * 3600 + float(m.group(2)) * 60 + float(m.group(3))
+        for m in re.finditer(
+            r"Dialogue: 0,(\d+):(\d\d):(\d\d\.\d\d),.*?,s1,", ass_text
+        )
+    ]
+    assert starts, f"no s1 Dialogue lines found in:\n{ass_text}"
+    for start in starts:
+        assert 0.0 <= start <= clip_duration, (
+            f"Dialogue start {start}s outside clip bounds [0, {clip_duration}]"
+        )
+    assert mp4.exists()
+
+
 def test_render_clip_loudness_is_normalized_to_minus_14_lufs(tmp_path):
     video = fixture("real_talking_head.mp4")
     info = probe(video)

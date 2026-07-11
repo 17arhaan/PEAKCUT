@@ -113,6 +113,11 @@ def words_to_ass(
     grouped 3-5 per Dialogue line with per-word \\kf karaoke timing,
     bottom-center with a 20% vertical / 8% horizontal safe margin.
 
+    `words` timestamps must already be clip-relative (0-based) -- this
+    function does not rebase them. The caller (render_clip) is responsible
+    for subtracting cut.t0 from each Word before passing it in, since the
+    rendered clip's own timeline starts at 0 after the -ss trim.
+
     `hook_title`, if given, adds a SECOND Dialogue line + Style in the same
     file: plain text (no \\kf), bold, larger, top-center-aligned with a 15%
     top margin, shown from 0s to min(_HOOK_DISPLAY_S, clip_duration_s) --

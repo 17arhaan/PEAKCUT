@@ -10,6 +10,7 @@ A single frame at cut.t0 (post-crop, no captions) is exported as a
 """
 
 import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -141,7 +142,14 @@ def render_clip(
     thumb = out_dir / "thumb.jpg"
     ass_path = out_dir / "clip.ass"
 
-    clip_words = [w for w in idx.words if cut.t0 <= w.t0 < cut.t1]
+    # words_to_ass expects clip-relative timestamps (its output is burned
+    # into a clip whose own timeline starts at 0 post -ss trim); idx.words
+    # carries absolute source timestamps, so rebase before handing off.
+    clip_words = [
+        dataclasses.replace(w, t0=w.t0 - cut.t0, t1=w.t1 - cut.t0)
+        for w in idx.words
+        if cut.t0 <= w.t0 < cut.t1
+    ]
     ass_path.write_text(
         words_to_ass(
             clip_words, style, (TARGET_W, TARGET_H),
