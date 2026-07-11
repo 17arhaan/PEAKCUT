@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
+import { importRun } from "@/lib/run-import";
 
 /**
  * Worker seam. `worker` is the object other app code should call — a
@@ -75,18 +76,6 @@ async function markFailed(jobId: string, error: string): Promise<void> {
   await db
     .update(jobs)
     .set({ status: "failed", error: error.slice(0, 2000), updatedAt: new Date() })
-    .where(eq(jobs.id, jobId));
-}
-
-// W7 implements this: parses outDir/run.json (+ per-clip artifacts) into
-// `clips` rows and marks the job `done` with duration/cost derived from the
-// run. Stubbed here so the worker seam has somewhere to hand off on a
-// successful exit; this stub just flips the job to done so the create ->
-// spawn -> complete flow is demonstrably whole end to end.
-export async function importRun(jobId: string, _outDir: string): Promise<void> {
-  await db
-    .update(jobs)
-    .set({ status: "done", stage: "render", progress: 1, updatedAt: new Date() })
     .where(eq(jobs.id, jobId));
 }
 

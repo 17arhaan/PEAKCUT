@@ -46,26 +46,32 @@ export const jobs = pgTable("jobs", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const clips = pgTable("clips", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  jobId: text("job_id")
-    .notNull()
-    .references(() => jobs.id, { onDelete: "cascade" }),
-  clipIndex: integer("clip_index").notNull(),
-  tStart: real("t_start").notNull(),
-  tEnd: real("t_end").notNull(),
-  score: integer("score"),
-  hook: text("hook"),
-  captions: jsonb("captions"),
-  evidence: jsonb("evidence"),
-  qa: jsonb("qa"),
-  r2Key: text("r2_key"),
-  thumbKey: text("thumb_key"),
-  status: text("status").$type<"ready" | "dropped">().notNull(),
-  droppedReason: text("dropped_reason"),
-});
+export const clips = pgTable(
+  "clips",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    clipIndex: integer("clip_index").notNull(),
+    tStart: real("t_start").notNull(),
+    tEnd: real("t_end").notNull(),
+    score: integer("score"),
+    hook: text("hook"),
+    captions: jsonb("captions"),
+    evidence: jsonb("evidence"),
+    qa: jsonb("qa"),
+    r2Key: text("r2_key"),
+    thumbKey: text("thumb_key"),
+    status: text("status").$type<"ready" | "dropped">().notNull(),
+    droppedReason: text("dropped_reason"),
+  },
+  // run.json import (W7) is replayable: re-importing the same job upserts
+  // by (job_id, clip_index) instead of duplicating rows.
+  (table) => [unique().on(table.jobId, table.clipIndex)],
+);
 
 export const agentEvents = pgTable("agent_events", {
   id: text("id")

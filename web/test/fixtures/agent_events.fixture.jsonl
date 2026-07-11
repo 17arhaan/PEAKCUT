@@ -1,0 +1,3 @@
+{"agent": "scout", "action": "propose", "payload": {"clip": 0, "note": "candidate window"}, "tokens_in": 120, "tokens_out": 45}
+{"agent": "critic", "action": "challenge", "payload": {"clip": 0, "verdict": "borderline"}, "tokens_in": 80, "tokens_out": 30}
+{"agent": "qa", "action": "repair", "payload": {"clip": 1, "codes": ["BLACK"], "route": "surgeon", "attempt": 1, "outcome": "failed"}, "tokens_in": 0, "tokens_out": 0}
