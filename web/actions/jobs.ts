@@ -1,6 +1,7 @@
 "use server";
 
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
@@ -86,7 +87,16 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
     status: "queued",
   });
 
-  await worker.start({ id: jobId, source, outDir });
+  try {
+    await worker.start({ id: jobId, source, outDir });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "unknown worker error";
+    await db
+      .update(jobs)
+      .set({ status: "failed", error: errorMsg, updatedAt: new Date() })
+      .where(eq(jobs.id, jobId));
+    throw err;
+  }
 
   return { jobId };
 }

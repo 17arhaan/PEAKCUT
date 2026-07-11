@@ -140,7 +140,11 @@ async function tailAgentEvents(jobId: string, outDir: string, stopped: () => boo
         const idx = STAGE_ORDER.indexOf(stage);
         if (idx > stageIdx) {
           stageIdx = idx;
-          await setJobStage(jobId, stage);
+          try {
+            await setJobStage(jobId, stage);
+          } catch (err) {
+            console.error(`[job ${jobId}] stage update failed:`, err);
+          }
         }
       }
     } finally {
@@ -183,26 +187,36 @@ export class LocalWorker implements Worker {
     closeSync(logFd); // child has its own dup of the fd; safe to close ours
 
     let stopped = false;
-    void tailAgentEvents(jobId, outDir, () => stopped);
+    void tailAgentEvents(jobId, outDir, () => stopped).catch((err) => {
+      console.error(`[job ${jobId}] tailAgentEvents error:`, err);
+    });
 
     child.on("exit", async (code) => {
       stopped = true;
-      const runJsonPath = path.join(outDir, "run.json");
       try {
-        await stat(runJsonPath);
-        await importRun(jobId, outDir);
-      } catch {
-        const tail = await stderrTail(logPath);
-        await markFailed(
-          jobId,
-          tail || `pipeline exited with code ${code ?? "unknown"} and produced no run.json`,
-        );
+        const runJsonPath = path.join(outDir, "run.json");
+        try {
+          await stat(runJsonPath);
+          await importRun(jobId, outDir);
+        } catch {
+          const tail = await stderrTail(logPath);
+          await markFailed(
+            jobId,
+            tail || `pipeline exited with code ${code ?? "unknown"} and produced no run.json`,
+          );
+        }
+      } catch (err) {
+        console.error(`[job ${jobId}] exit handler error:`, err);
       }
     });
 
     child.on("error", async (err) => {
       stopped = true;
-      await markFailed(jobId, err.message);
+      try {
+        await markFailed(jobId, err.message);
+      } catch (dbErr) {
+        console.error(`[job ${jobId}] error handler DB write failed:`, dbErr);
+      }
     });
 
     child.unref();

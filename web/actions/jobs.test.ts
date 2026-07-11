@@ -117,4 +117,26 @@ describe("createJob", () => {
 
     expect(mockWorkerStart).not.toHaveBeenCalled();
   });
+
+  it("marks job failed when worker.start rejects", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+
+    let capturedJobId: string | undefined;
+    mockWorkerStart.mockImplementationOnce(async (job) => {
+      capturedJobId = job.id;
+      throw new Error("mkdir failed");
+    });
+
+    await expect(
+      createJob({ source: "https://youtube.com/watch?v=test", sourceType: "url" }),
+    ).rejects.toThrow(/mkdir failed/);
+
+    expect(capturedJobId).toBeDefined();
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, capturedJobId!));
+    expect(row).toMatchObject({
+      status: "failed",
+      error: "mkdir failed",
+    });
+  });
 });
