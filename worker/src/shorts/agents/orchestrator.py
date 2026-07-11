@@ -12,19 +12,11 @@ clips -- see _best_effort.
 
 from shorts.agent_log import AgentLog
 from shorts.agents.critic import score as critic_score
-from shorts.agents.scout import candidates as scout_candidates, fallback_candidates
+from shorts.agents.scout import candidates as scout_candidates, fallback_candidates, _iou
 from shorts.types import Candidate, Scored, SignalIndex
 
 MAX_ROUNDS = 2
 BEST_EFFORT_N = 4
-
-
-def _iou(a: Candidate, b: Candidate) -> float:
-    inter = max(0.0, min(a.t1, b.t1) - max(a.t0, b.t0))
-    if inter <= 0.0:
-        return 0.0
-    union = (a.t1 - a.t0) + (b.t1 - b.t0) - inter
-    return inter / union if union > 0 else 0.0
 
 
 def _log_verdict(log: AgentLog, s: Scored, round_i: int) -> None:

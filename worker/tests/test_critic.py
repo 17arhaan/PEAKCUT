@@ -7,7 +7,7 @@ import json
 
 from shorts.agent_log import AgentLog
 from shorts.agents import critic, orchestrator
-from shorts.agents.critic import score as critic_score
+from shorts.agents.critic import score as critic_score, _verdict
 from shorts.agents.orchestrator import run_crew
 from shorts.types import Candidate, Claim, Curve, MediaInfo, Peak, Scored, SignalIndex, Span, Word
 
@@ -99,6 +99,28 @@ def test_stub_score_is_deterministic(tmp_path):
     b = critic_score(cand, idx, _log(tmp_path, "b.jsonl"))
 
     assert a == b
+
+
+def test_verdict_boundaries():
+    """Test the exact boundary thresholds: >=70 keep, <=45 kill, else borderline."""
+    assert _verdict(70) == "keep"
+    assert _verdict(69) == "borderline"
+    assert _verdict(46) == "borderline"
+    assert _verdict(45) == "kill"
+
+
+def test_stub_score_cap_at_90_with_seven_plus_evidence(tmp_path):
+    """7+ evidence claims should stub-score to exactly 90 (min(90, 15*n) cap).
+    7 claims -> min(90, 15*7) = min(90, 105) = 90."""
+    evidence = [Claim(kind="energy_peak", t=float(i), value=1.0) for i in range(7)]
+    cand = Candidate(t0=0.0, t1=20.0, source="rule_a_energy_rate", evidence=evidence)
+    idx = _mk_index()
+
+    scored = critic_score(cand, idx, _log(tmp_path))
+
+    assert scored.total == 90
+    assert scored.verdict == "keep"
+    assert sum(comp_score for comp_score, _ in scored.components.values()) == 90
 
 
 # --- live-mode scoring (complete_json monkeypatched) -----------------------
