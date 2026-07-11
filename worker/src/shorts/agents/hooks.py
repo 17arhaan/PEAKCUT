@@ -11,6 +11,8 @@ a fully deterministic title/captions built straight from the cut's own
 transcript.
 """
 
+import string
+
 from shorts.agent_log import AgentLog
 from shorts.agents.llm import StubModeError, complete_json
 from shorts.signals.index import words_in
@@ -47,6 +49,13 @@ HOOK_LLM_SCHEMA = {
 }
 
 
+def _normalize_for_match(s: str) -> str:
+    """Normalize text for banned phrase matching: lowercase, remove apostrophes,
+    collapse whitespace. Keeps other punctuation at token boundaries."""
+    normalized = s.lower().replace("'", "").replace('"', "")
+    return " ".join(normalized.split())
+
+
 def _violations(title: str, captions: dict) -> list[str]:
     """Every constraint violation of `title`/`captions`, checked in code."""
     out = []
@@ -55,11 +64,15 @@ def _violations(title: str, captions: dict) -> list[str]:
         out.append(f"title has {len(words)} words, max {_MAX_TITLE_WORDS}")
 
     lowered = title.lower()
+    normalized_title = _normalize_for_match(title)
     for phrase in sorted(_BANNED_PHRASES):
-        if phrase in lowered:
+        normalized_phrase = _normalize_for_match(phrase)
+        if normalized_phrase in normalized_title:
             out.append(f"title contains banned phrase {phrase!r}")
 
-    hit_profanity = _PROFANITY & set(lowered.split())
+    # Strip punctuation from each token before checking profanity.
+    tokens = [w.strip(string.punctuation) for w in lowered.split()]
+    hit_profanity = _PROFANITY & set(tokens)
     if hit_profanity:
         out.append(f"title contains profanity: {sorted(hit_profanity)}")
 

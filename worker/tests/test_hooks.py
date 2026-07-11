@@ -270,3 +270,30 @@ def test_violations_pure_function():
         "one two three four five six seven eight nine",
         {"tiktok": "x", "reels": "y", "shorts": "z"},
     )
+
+
+def test_profanity_with_punctuation():
+    """Profanity should be detected even when wrapped in punctuation."""
+    violations = _violations("This Is Complete Shit.", {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert any("profanity" in v for v in violations), f"Expected profanity violation, got {violations}"
+
+    violations = _violations("What the fuck!", {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert any("profanity" in v for v in violations), f"Expected profanity violation, got {violations}"
+
+    violations = _violations("This is damn annoying.", {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert any("profanity" in v for v in violations), f"Expected profanity violation, got {violations}"
+
+
+def test_banned_phrase_without_apostrophe():
+    """Banned phrases should be detected even when apostrophes are omitted."""
+    violations = _violations("You wont believe this", {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert any("banned phrase" in v for v in violations), f"Expected banned phrase violation, got {violations}"
+
+    violations = _violations("Gone wrong in the shop", {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert any("banned phrase" in v for v in violations), f"Expected banned phrase violation, got {violations}"
+
+
+def test_clean_title_passes():
+    """A clean title should pass all checks."""
+    violations = _violations("Amazing Tech Tips Today", {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert violations == [], f"Expected clean title, got violations: {violations}"
