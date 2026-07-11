@@ -6,12 +6,18 @@ path; the only optional call is a one-shot tie-break when the t0 snap has
 two equally-plausible targets (silence edge vs. word start) within 2s of
 each other -- stub mode (SHORTS_LLM=stub, the default, no API key needed)
 never calls out and deterministically keeps the earlier of the two.
+
+`repair()` (T14) is the second entry point: given an already-rendered Cut
+and the QAFails it triggered, deterministically produce a revised Cut for
+WORD_CLIP/ALIGN failures the pipeline's bounded repair loop routes back
+here. No LLM here either.
 """
 
 from shorts.agent_log import AgentLog
 from shorts.agents.llm import StubModeError, complete_json
+from shorts.qa import _ALIGN_P95_MAX_MS
 from shorts.signals.index import words_in
-from shorts.types import Candidate, Cut, SignalIndex
+from shorts.types import Candidate, Cut, QAFail, SignalIndex
 
 _MIN_SILENCE_DUR_S = 0.3
 # ponytail: bounds how far back t0 is allowed to jump -- a silence more than
@@ -173,6 +179,26 @@ def _payoff_word_i(cand: Candidate, idx: SignalIndex) -> int | None:
     return last_i
 
 
+def _clamp_duration(t0: float, t1: float, duration: float) -> tuple[float, float]:
+    """Clamp a [t0, t1) window to media bounds first, then to the
+    [_MIN_DUR_S, _MAX_DUR_S] duration bounds -- position bound takes
+    priority (a clip can never extend past the real video, even if that
+    means giving up exact word/silence alignment at the very edge of the
+    source). Shared by refine() and repair() so every cut-producing path
+    enforces the same bounds."""
+    t0 = max(0.0, min(t0, duration))
+    t1 = max(0.0, min(t1, duration))
+    if t1 < t0:
+        t0, t1 = t1, t0  # ponytail: degenerate snap collision -- keep Cut well-formed
+
+    if t1 - t0 < _MIN_DUR_S:
+        t1 = min(duration, t0 + _MIN_DUR_S)
+        t0 = max(0.0, t1 - _MIN_DUR_S)
+    elif t1 - t0 > _MAX_DUR_S:
+        t1 = t0 + _MAX_DUR_S
+    return t0, t1
+
+
 def refine(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Cut:
     """Deterministically refine `cand`'s raw window into a Cut whose
     boundaries sit on speech edges: t0 snaps to a preceding silence (or,
@@ -185,17 +211,7 @@ def refine(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Cut:
     t0 = _strip_leading_fillers(t0, idx)
     t1 = _snap_t1(cand, idx)
 
-    duration = idx.media.duration_s
-    t0 = max(0.0, min(t0, duration))
-    t1 = max(0.0, min(t1, duration))
-    if t1 < t0:
-        t0, t1 = t1, t0  # ponytail: degenerate snap collision -- keep Cut well-formed
-
-    if t1 - t0 < _MIN_DUR_S:
-        t1 = min(duration, t0 + _MIN_DUR_S)
-        t0 = max(0.0, t1 - _MIN_DUR_S)
-    elif t1 - t0 > _MAX_DUR_S:
-        t1 = t0 + _MAX_DUR_S
+    t0, t1 = _clamp_duration(t0, t1, idx.media.duration_s)
 
     payoff_word_i = _payoff_word_i(cand, idx)
 
@@ -207,3 +223,88 @@ def refine(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Cut:
         },
     )
     return Cut(t0=t0, t1=t1, payoff_word_i=payoff_word_i)
+
+
+# --- repair: T14 bounded re-repair for surgeon-routed QA failures ----------
+
+
+def _repair_word_clip(cut: Cut, idx: SignalIndex, log: AgentLog) -> Cut:
+    """Re-run the same t0/t1 boundary-snap rules refine() uses, but anchored
+    on the CURRENT cut boundary and only for whichever boundary a word
+    actually straddles (words_in's zero-width-window trick, same predicate
+    qa._check_word_clip uses) -- the other boundary is left untouched. For a
+    straddling word, _snap_t0/_snap_t1's own word-start/word-end rules
+    resolve to that same word's own edge, extending the cut to include it
+    whole rather than clipping into it."""
+    t0, t1 = cut.t0, cut.t1
+    if words_in(idx, t0, t0):
+        temp = Candidate(t0=t0, t1=t1, source="repair", evidence=[])
+        t0 = _strip_leading_fillers(_snap_t0(temp, idx, log), idx)
+    if words_in(idx, t1, t1):
+        temp = Candidate(t0=t0, t1=t1, source="repair", evidence=[])
+        t1 = _snap_t1(temp, idx)
+    return Cut(t0=t0, t1=t1, payoff_word_i=cut.payoff_word_i)
+
+
+def _best_align_run(idx: SignalIndex, t0: float, t1: float) -> tuple[float, float] | None:
+    """Longest (by time span) contiguous run of ALIGN-eligible words inside
+    [t0, t1) whose own p95 align_err_ms is <=_ALIGN_P95_MAX_MS -- same p95
+    formula qa._check_align uses, words with align_err_ms=None skipped, same
+    as that check. None if no run qualifies (including "no alignable words
+    at all"). # ponytail: O(n^2) scan over the words in one cut -- clip-sized
+    word counts (tens, not thousands), upgrade to a sliding window if this
+    ever shows up in a profile."""
+    words = sorted(
+        (w for w in words_in(idx, t0, t1) if w.align_err_ms is not None),
+        key=lambda w: w.t0,
+    )
+    if not words:
+        return None
+
+    best: tuple[float, float] | None = None
+    best_span = 0.0
+    for i in range(len(words)):
+        errs: list[float] = []
+        for j in range(i, len(words)):
+            errs.append(words[j].align_err_ms)
+            sorted_errs = sorted(errs)
+            p95 = sorted_errs[int(0.95 * (len(sorted_errs) - 1))]
+            if p95 <= _ALIGN_P95_MAX_MS:
+                span = words[j].t1 - words[i].t0
+                if span > best_span:
+                    best_span = span
+                    best = (words[i].t0, words[j].t1)
+    return best
+
+
+def _repair_align(cut: Cut, idx: SignalIndex) -> Cut:
+    """Trim the cut to the longest well-aligned contiguous word run inside
+    it, if that run is at least _MIN_DUR_S long -- otherwise this cut can't
+    be repaired this way and is returned unchanged (the pipeline's repair
+    loop will exhaust its budget and drop the clip)."""
+    run = _best_align_run(idx, cut.t0, cut.t1)
+    if run is None or run[1] - run[0] < _MIN_DUR_S:
+        return cut
+    return Cut(t0=run[0], t1=run[1], payoff_word_i=cut.payoff_word_i)
+
+
+def repair(cut: Cut, idx: SignalIndex, failures: list[QAFail], log: AgentLog) -> Cut:
+    """Deterministic, no-LLM repair for surgeon-routed QA failures
+    (WORD_CLIP, ALIGN) -- called by the pipeline's bounded repair loop.
+    Any other codes mixed into `failures` are ignored here (the pipeline
+    only calls this when at least one failure routes to "surgeon"; a
+    render-routed code alongside it needs no cut change, just a
+    re-render)."""
+    codes = {f.code for f in failures}
+    new_cut = cut
+    if "WORD_CLIP" in codes:
+        new_cut = _repair_word_clip(new_cut, idx, log)
+    if "ALIGN" in codes:
+        new_cut = _repair_align(new_cut, idx)
+
+    t0, t1 = _clamp_duration(new_cut.t0, new_cut.t1, idx.media.duration_s)
+    log.emit(
+        "surgeon", "repaired",
+        {"codes": sorted(codes), "orig_t0": cut.t0, "orig_t1": cut.t1, "t0": t0, "t1": t1},
+    )
+    return Cut(t0=t0, t1=t1, payoff_word_i=new_cut.payoff_word_i)

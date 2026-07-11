@@ -1,9 +1,14 @@
 """qa.check: the pure-code QA gate. Inspects a rendered clip and the source
 SignalIndex it was cut from; no LLM anywhere in this module.
 
-Six checks, all currently route_to="drop" -- there's no surgeon/re-render
-path yet, so any failure just drops the clip. # ponytail: routing lands in
-T14, this module doesn't need to know about it before then.
+Six checks. Each failure carries a route_to telling the pipeline's repair
+loop (T14) where to send it: WORD_CLIP/ALIGN are cut-caused, so they route
+back to "surgeon" for a deterministic re-refine; RES/LUFS/BLACK/FROZEN are
+render-caused (or, for BLACK/FROZEN, may be genuine source-content defects
+a re-render can't fix -- that's expected, the repair loop bounds the
+retries and drops). DUR isn't in the repair map -- surgeon.refine already
+clamps every cut to [5, 90]s, so a DUR failure post-refine is an anomaly,
+not a repairable routing case; it drops immediately.
 """
 
 import re
@@ -24,7 +29,17 @@ _LUFS_TOLERANCE = 1.0
 _ALIGN_P95_MAX_MS = 300.0
 _MIN_DUR_S = 5.0
 _MAX_DUR_S = 90.0
-_ROUTE_TO = "drop"  # ponytail: routing lands in T14
+
+# code -> stage the pipeline's repair loop routes a failure to.
+_ROUTE = {
+    "RES": "render",
+    "LUFS": "render",
+    "BLACK": "render",
+    "FROZEN": "render",
+    "WORD_CLIP": "surgeon",
+    "ALIGN": "surgeon",
+    "DUR": "drop",
+}
 
 _EBUR128_I_RE = re.compile(r"I:\s*(-?[\d.]+) LUFS")
 
@@ -52,7 +67,7 @@ def _measure_lufs(mp4: Path) -> float:
 def _check_res(width: int, height: int) -> QAFail | None:
     if (width, height) != (TARGET_W, TARGET_H):
         return QAFail(
-            code="RES", detail=f"{width}x{height} != {TARGET_W}x{TARGET_H}", route_to=_ROUTE_TO
+            code="RES", detail=f"{width}x{height} != {TARGET_W}x{TARGET_H}", route_to=_ROUTE["RES"]
         )
     return None
 
@@ -62,7 +77,7 @@ def _check_dur(duration_s: float) -> QAFail | None:
         return QAFail(
             code="DUR",
             detail=f"duration {duration_s:.2f}s outside [{_MIN_DUR_S}, {_MAX_DUR_S}]",
-            route_to=_ROUTE_TO,
+            route_to=_ROUTE["DUR"],
         )
     return None
 
@@ -73,7 +88,7 @@ def _check_lufs(mp4: Path) -> QAFail | None:
         return QAFail(
             code="LUFS",
             detail=f"{lufs:.1f} LUFS outside {_LUFS_TARGET}+-{_LUFS_TOLERANCE}",
-            route_to=_ROUTE_TO,
+            route_to=_ROUTE["LUFS"],
         )
     return None
 
@@ -85,12 +100,18 @@ def _check_defects(mp4: Path) -> list[QAFail]:
     out: list[QAFail] = []
     if black:
         out.append(
-            QAFail(code="BLACK", detail=f"{len(black)} black span(s): {black}", route_to=_ROUTE_TO)
+            QAFail(
+                code="BLACK",
+                detail=f"{len(black)} black span(s): {black}",
+                route_to=_ROUTE["BLACK"],
+            )
         )
     if frozen:
         out.append(
             QAFail(
-                code="FROZEN", detail=f"{len(frozen)} frozen span(s): {frozen}", route_to=_ROUTE_TO
+                code="FROZEN",
+                detail=f"{len(frozen)} frozen span(s): {frozen}",
+                route_to=_ROUTE["FROZEN"],
             )
         )
     return out
@@ -106,7 +127,7 @@ def _check_word_clip(cut: Cut, idx: SignalIndex) -> QAFail | None:
         return QAFail(
             code="WORD_CLIP",
             detail=f"{len(words)} word(s) straddle a cut boundary: {[w.text for w in words]}",
-            route_to=_ROUTE_TO,
+            route_to=_ROUTE["WORD_CLIP"],
         )
     return None
 
@@ -130,7 +151,7 @@ def _check_align(cut: Cut, idx: SignalIndex) -> QAFail | None:
         return QAFail(
             code="ALIGN",
             detail=f"p95 align_err_ms={p95:.1f} > {_ALIGN_P95_MAX_MS}",
-            route_to=_ROUTE_TO,
+            route_to=_ROUTE["ALIGN"],
         )
     return None
 

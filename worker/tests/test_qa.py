@@ -152,9 +152,11 @@ def test_qa_black_corrupt_fails_black(black_corrupt_clip):
     assert not report.passed
 
 
-def test_qa_failures_route_to_drop(res_corrupt_clip):
+def test_qa_render_caused_failures_route_to_render(res_corrupt_clip):
+    """RES is render-caused per T14's routing map -- a re-render (not a
+    surgeon re-cut, not an immediate drop) is the repair path."""
     report = check(res_corrupt_clip, _CUT, _clean_idx())
-    assert all(f.route_to == "drop" for f in report.failures)
+    assert all(f.route_to == "render" for f in report.failures)
 
 
 # --- pure unit tests: WORD_CLIP / ALIGN / DUR, no rendering --------------
