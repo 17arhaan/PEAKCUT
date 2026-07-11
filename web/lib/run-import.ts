@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -86,47 +86,70 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
   );
   const durationMin = run.duration_processed_s === null ? null : run.duration_processed_s / 60;
 
-  await db.transaction(async (tx) => {
+  // Copy every clip's render/thumb into storage BEFORE opening the DB
+  // transaction, not inside it: a copy is file I/O today (LocalStorage) but
+  // will be a network call once R2Storage lands, and a tx must never sit
+  // open across network I/O. Doing all copies up front also means a missing
+  // source file aborts the whole import before any DB row is written --
+  // no tx to roll back, no partial clip rows.
+  const copiedKeys: { mp4Key: string | null; thumbKey: string | null }[] = [];
+  try {
     for (const clip of run.clips) {
-      const row = await clipRow(userId, jobId, clip);
+      copiedKeys.push(await copyClipFiles(userId, jobId, clip));
+    }
+  } catch (err) {
+    await cleanupCopiedKeys(copiedKeys);
+    throw err;
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      for (const [i, clip] of run.clips.entries()) {
+        const row = clipRow(jobId, clip, copiedKeys[i]);
+        await tx
+          .insert(clips)
+          .values(row)
+          .onConflictDoUpdate({ target: [clips.jobId, clips.clipIndex], set: row });
+      }
+
+      // No natural unique key per agent_events.jsonl line (identical lines
+      // are legitimate), so idempotent replay is delete-then-insert rather
+      // than upsert.
+      await tx.delete(agentEvents).where(eq(agentEvents.jobId, jobId));
+      if (agentEventLines.length > 0) {
+        await tx.insert(agentEvents).values(
+          agentEventLines.map((e) => ({
+            jobId,
+            agent: e.agent,
+            action: e.action,
+            payload: e.payload,
+            tokensIn: e.tokens_in,
+            tokensOut: e.tokens_out,
+          })),
+        );
+      }
+
+      // status='done' flipped LAST so a polling client never observes 'done'
+      // with partial clip rows.
       await tx
-        .insert(clips)
-        .values(row)
-        .onConflictDoUpdate({ target: [clips.jobId, clips.clipIndex], set: row });
-    }
-
-    // No natural unique key per agent_events.jsonl line (identical lines
-    // are legitimate), so idempotent replay is delete-then-insert rather
-    // than upsert.
-    await tx.delete(agentEvents).where(eq(agentEvents.jobId, jobId));
-    if (agentEventLines.length > 0) {
-      await tx.insert(agentEvents).values(
-        agentEventLines.map((e) => ({
-          jobId,
-          agent: e.agent,
-          action: e.action,
-          payload: e.payload,
-          tokensIn: e.tokens_in,
-          tokensOut: e.tokens_out,
-        })),
-      );
-    }
-
-    // status='done' flipped LAST so a polling client never observes 'done'
-    // with partial clip rows.
-    await tx
-      .update(jobs)
-      .set({
-        costCents,
-        durationMin,
-        status: "done",
-        stage: "render",
-        progress: 1,
-        error: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(jobs.id, jobId));
-  });
+        .update(jobs)
+        .set({
+          costCents,
+          durationMin,
+          status: "done",
+          stage: "render",
+          progress: 1,
+          error: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(jobs.id, jobId));
+    });
+  } catch (err) {
+    // tx rolled back its own DB writes; the already-copied files are not
+    // part of that transaction, so clean them up ourselves.
+    await cleanupCopiedKeys(copiedKeys);
+    throw err;
+  }
 }
 
 async function readAgentEvents(outDir: string) {
@@ -140,7 +163,12 @@ async function readAgentEvents(outDir: string) {
   return lines.map((line) => AgentEventSchema.parse(JSON.parse(line)));
 }
 
-async function clipRow(userId: string, jobId: string, clip: ClipEntry) {
+/** Copies a clip's render + thumb into storage. Called before the DB tx opens (see doImport). */
+async function copyClipFiles(
+  userId: string,
+  jobId: string,
+  clip: ClipEntry,
+): Promise<{ mp4Key: string | null; thumbKey: string | null }> {
   const mp4Key = clip.paths.mp4
     ? await copyIntoStorage(clip.paths.mp4, `u/${userId}/${jobId}/clip_${clip.index}.mp4`)
     : null;
@@ -150,7 +178,16 @@ async function clipRow(userId: string, jobId: string, clip: ClipEntry) {
         `u/${userId}/${jobId}/clip_${clip.index}_thumb${path.extname(clip.paths.thumb) || ".jpg"}`,
       )
     : null;
+  return { mp4Key, thumbKey };
+}
 
+/** Best-effort cleanup of already-copied files when a later clip's copy, or the tx, fails. */
+async function cleanupCopiedKeys(copiedKeys: { mp4Key: string | null; thumbKey: string | null }[]) {
+  const keys = copiedKeys.flatMap((k) => [k.mp4Key, k.thumbKey]).filter((k): k is string => k !== null);
+  await Promise.all(keys.map((key) => rm(resolveStoragePath(key), { force: true }).catch(() => {})));
+}
+
+function clipRow(jobId: string, clip: ClipEntry, keys: { mp4Key: string | null; thumbKey: string | null }) {
   return {
     jobId,
     clipIndex: clip.index,
@@ -160,11 +197,12 @@ async function clipRow(userId: string, jobId: string, clip: ClipEntry) {
     hook: clip.hook === null ? null : clip.hook.title,
     captions: clip.hook === null ? null : clip.hook.captions,
     // The "why this clip" audit trail: score (full breakdown) + candidate
-    // (the pre-cut window it came from), verbatim from run.json.
-    evidence: { score: clip.score, candidate: clip.candidate },
+    // (the pre-cut window it came from) + repairs (what QA/surgeon did to
+    // it), verbatim from run.json.
+    evidence: { score: clip.score, candidate: clip.candidate, repairs: clip.repairs },
     qa: clip.qa,
-    r2Key: mp4Key,
-    thumbKey,
+    r2Key: keys.mp4Key,
+    thumbKey: keys.thumbKey,
     status: (clip.dropped_reason ? "dropped" : "ready") as "dropped" | "ready",
     droppedReason: clip.dropped_reason,
   };

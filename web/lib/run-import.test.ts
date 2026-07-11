@@ -116,7 +116,14 @@ describe("importRun: full import of the real fixture", () => {
     expect(c1.hook).toBe("Novelist, Essayist And Philosopher, Rona");
     expect(c1.captions).toEqual(fixtureClips[0].hook!.captions);
     expect(c1.qa).toEqual({ passed: true, failures: [] });
-    expect(c1.evidence).toEqual({ score: fixtureClips[0].score, candidate: fixtureClips[0].candidate });
+    expect(c1.evidence).toEqual({
+      score: fixtureClips[0].score,
+      candidate: fixtureClips[0].candidate,
+      repairs: fixtureClips[0].repairs,
+    });
+    // Clip 3 has non-empty repairs (a fixed ALIGN issue) -- confirms the
+    // repair history survives into the evidence blob, not just an empty array.
+    expect(c3.evidence).toMatchObject({ repairs: [{ attempt: 1, codes: ["ALIGN"], route: "surgeon", outcome: "fixed" }] });
     expect(c1.status).toBe("ready");
     expect(c1.droppedReason).toBeNull();
     expect(c1.r2Key).toBe(`u/${userId}/${jobId}/clip_1.mp4`);
@@ -198,7 +205,7 @@ describe("importRun: null-safety", () => {
     expect(row.thumbKey).toBeNull();
     // status derived from dropped_reason, not from score/hook/qa being null
     expect(row.status).toBe("ready");
-    expect(row.evidence).toEqual({ score: null, candidate: clip.candidate });
+    expect(row.evidence).toEqual({ score: null, candidate: clip.candidate, repairs: [] });
   });
 });
 
@@ -232,6 +239,28 @@ describe("importRun: error paths", () => {
     const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(jobRow.status).toBe("failed");
     expect(jobRow.error).toMatch(/version/i);
+  });
+
+  it("marks the job failed with zero clip rows when a clip's paths.mp4 points at a nonexistent file", async () => {
+    const { userId, jobId, outDir } = await setup();
+    cleanupTargets.push({ userId, jobId, outDir });
+
+    const missingPath = path.join(outDir, "does-not-exist.mp4");
+    const run = makeRun([
+      makeClip({ index: 1, paths: { mp4: missingPath, thumb: null } }),
+    ]);
+    await writeFile(path.join(outDir, "run.json"), JSON.stringify(run));
+
+    await expect(importRun(jobId, outDir)).resolves.toBeUndefined();
+
+    const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(jobRow.status).toBe("failed");
+    expect(jobRow.error).toBeTruthy();
+
+    // Transaction never opened (copy happens before it) -- no partial/broken
+    // r2_key row was ever written for this job.
+    const rows = await db.select().from(clips).where(eq(clips.jobId, jobId));
+    expect(rows).toHaveLength(0);
   });
 
   it("fails the job (not the process) on malformed JSON", async () => {
