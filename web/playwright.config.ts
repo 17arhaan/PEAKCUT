@@ -39,5 +39,10 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // Worker seam switch (see lib/worker.ts): a real job spawns
+    // `uv run ... shorts run` — minutes of whisper/yt-dlp work, far too
+    // heavy for e2e. STUB_WORKER=1 swaps in a no-op worker for this whole
+    // dev server process.
+    env: { ...process.env, STUB_WORKER: "1" },
   },
 });

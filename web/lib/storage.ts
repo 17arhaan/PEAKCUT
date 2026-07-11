@@ -66,6 +66,23 @@ export function resolveStoragePath(key: string, root: string = STORAGE_ROOT): st
   return path.resolve(root, key);
 }
 
+/**
+ * The ownership check app/api/upload and app/api/media each inline
+ * (sanitize, then require the key live under the caller's own u/<userId>/
+ * prefix, checked on both the raw string and the resolved path per
+ * sanitizeKey's docstring). Pulled out here so a third caller (createJob's
+ * upload-key validation) doesn't re-copy it a third time. Throws on any
+ * violation; returns the sanitized key on success.
+ */
+export function assertOwnedKey(key: string, userId: string, root: string = STORAGE_ROOT): string {
+  const sanitized = sanitizeKey(key, root);
+  const userRoot = path.resolve(root, "u", userId) + path.sep;
+  if (!sanitized.startsWith(`u/${userId}/`) || !path.resolve(root, sanitized).startsWith(userRoot)) {
+    throw new Error("storage key is not owned by this user");
+  }
+  return sanitized;
+}
+
 export class LocalStorage implements Storage {
   constructor(private readonly root: string = STORAGE_ROOT) {}
 

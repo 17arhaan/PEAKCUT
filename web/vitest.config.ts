@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./vitest.setup.ts"],
-    include: ["lib/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "actions/**/*.test.ts"],
   },
   resolve: {
     // mirrors tsconfig.json's "@/*" -> "./*" path alias
