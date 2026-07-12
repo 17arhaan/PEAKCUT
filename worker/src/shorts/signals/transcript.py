@@ -1,5 +1,8 @@
 """Speech-to-text via faster-whisper. Model size comes from
-SHORTS_WHISPER_MODEL (default "small"; tests set "tiny")."""
+SHORTS_WHISPER_MODEL (default "small"; tests set "tiny"). Device/compute
+type come from SHORTS_WHISPER_DEVICE (default "cpu") -- unset everywhere
+except Modal (modal_app.py sets it to "cuda" for the T4-GPU function; see
+worker/scripts/modal_spike.py for the CUDA/cuDNN recipe this depends on)."""
 
 import os
 from pathlib import Path
@@ -16,7 +19,9 @@ def transcribe(wav: Path) -> tuple[str, list[Word]]:
     all segments.
     """
     model_size = os.environ.get("SHORTS_WHISPER_MODEL", "small")
-    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    device = os.environ.get("SHORTS_WHISPER_DEVICE", "cpu")
+    compute_type = "float16" if device == "cuda" else "int8"
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
 
     segments, info = model.transcribe(str(wav), word_timestamps=True)
 
