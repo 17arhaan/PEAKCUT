@@ -15,11 +15,31 @@ from shorts.agent_log import AgentLog
 from shorts.agents.llm import LlmError, StubModeError, complete_json
 
 
-def _response(text: str, tokens_in: int = 10, tokens_out: int = 20):
+def _response(text: str, tokens_in: int = 10, tokens_out: int = 20, *, thinking: bool = False):
+    # Real API text blocks carry type="text"; a response may lead with a
+    # ThinkingBlock (type="thinking") the parser must skip.
+    blocks = []
+    if thinking:
+        blocks.append(SimpleNamespace(type="thinking", thinking="...", text=None))
+    blocks.append(SimpleNamespace(type="text", text=text))
     return SimpleNamespace(
-        content=[SimpleNamespace(text=text)],
+        content=blocks,
         usage=SimpleNamespace(input_tokens=tokens_in, output_tokens=tokens_out),
     )
+
+
+def test_skips_leading_thinking_block(tmp_path, monkeypatch):
+    """A response led by a ThinkingBlock resolves to the first text block."""
+    monkeypatch.setenv("SHORTS_LLM", "live")
+    log = AgentLog(tmp_path / "log.jsonl")
+    mock_client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kw: _response('{"evidence": []}', thinking=True)
+        )
+    )
+    with patch("shorts.agents.llm.anthropic.Anthropic", return_value=mock_client):
+        result = complete_json("prompt", SCHEMA, "scout", log)
+    assert result == {"evidence": []}
 
 
 SCHEMA = {"required": ["evidence"], "properties": {"evidence": {"type": "array"}}}

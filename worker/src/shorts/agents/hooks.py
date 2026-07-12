@@ -15,6 +15,7 @@ import string
 
 from shorts.agent_log import AgentLog
 from shorts.agents.llm import StubModeError, complete_json
+from shorts.qa import SAFE_AREA_MAX_CHARS as _SAFE_AREA_MAX_CHARS
 from shorts.signals.index import words_in
 from shorts.types import Cut, Hook, SignalIndex
 
@@ -23,9 +24,10 @@ _FALLBACK_TITLE_WORDS = 6
 _CAPTION_CAPS = {"tiktok": 150, "reels": 125, "shorts": 100}
 _PLATFORMS = tuple(_CAPTION_CAPS)
 
-# qa._check_safe_area's char cap -- the fallback title is hard-truncated to
-# this so the fallback path always passes SAFE_AREA (see _fallback).
-_SAFE_AREA_MAX_CHARS = 40
+# Imported from qa.py, the single source of truth -- both the live-LLM path
+# (_violations, enforced below) and the fallback (_fallback) are budgeted to
+# this SAME char cap, so a hook can never be generated here and then dropped
+# by qa._check_safe_area for being too long.
 
 # ponytail: clickbait ban list -- extend freely, matched case-insensitive
 # substring against the title.
@@ -62,6 +64,8 @@ def _violations(title: str, captions: dict) -> list[str]:
     words = title.split()
     if len(words) > _MAX_TITLE_WORDS:
         out.append(f"title has {len(words)} words, max {_MAX_TITLE_WORDS}")
+    if len(title) > _SAFE_AREA_MAX_CHARS:
+        out.append(f"title is {len(title)} chars, max {_SAFE_AREA_MAX_CHARS}")
 
     lowered = title.lower()
     normalized_title = _normalize_for_match(title)
@@ -125,7 +129,8 @@ def _prompt(transcript: str) -> str:
     return (
         "You are the Hook Writer agent in a shorts-clipping pipeline. Given "
         "the transcript of a short-form video clip, write an on-screen hook "
-        f"title (at most {_MAX_TITLE_WORDS} words, no clickbait phrases like "
+        f"title (at most {_MAX_TITLE_WORDS} words AND at most "
+        f"{_SAFE_AREA_MAX_CHARS} characters, no clickbait phrases like "
         '"you won\'t believe" or "wait for it", no profanity) and a caption '
         "for each platform (tiktok, reels, shorts) summarizing the clip, "
         f"within {_CAPTION_CAPS['tiktok']}/{_CAPTION_CAPS['reels']}/"

@@ -23,12 +23,15 @@ from shorts.types import Cut, Hook, QAFail, QAReport, SignalIndex
 TARGET_W, TARGET_H = 1080, 1920
 _LUFS_TARGET = -14.0
 _LUFS_TOLERANCE = 1.0
-_SAFE_AREA_MAX_CHARS = 40
+# Public (not underscore-prefixed): the SAFE_AREA char budget is shared with
+# agents/hooks.py, which imports this constant rather than redefining it, so
+# the Hook Writer and this QA check can never diverge.
+SAFE_AREA_MAX_CHARS = 40
 _SAFE_AREA_WIDTH_FRAC = 0.9
 # ponytail: char-width heuristic, real text measurement if fonts change --
-# picked so that _SAFE_AREA_MAX_CHARS characters always stays under
+# picked so that SAFE_AREA_MAX_CHARS characters always stays under
 # _SAFE_AREA_WIDTH_FRAC of the frame (40 * 20 = 800px < 0.9*1080 = 972px),
-# so hooks.py's fallback path (hard-capped at _SAFE_AREA_MAX_CHARS) is
+# so hooks.py's fallback path (hard-capped at SAFE_AREA_MAX_CHARS) is
 # guaranteed to pass this check purely by the char-length check.
 _SAFE_AREA_AVG_CHAR_WIDTH_PX = 20.0
 # PLAN AMENDMENT (decision 2026-07-11, recorded in signals/align.py): the
@@ -171,16 +174,16 @@ def _check_align(cut: Cut, idx: SignalIndex) -> QAFail | None:
 
 def _check_safe_area(hook: Hook | None, width: int) -> QAFail | None:
     """The hook title must fit the top safe area: at most
-    _SAFE_AREA_MAX_CHARS characters, and its estimated rendered width (char
+    SAFE_AREA_MAX_CHARS characters, and its estimated rendered width (char
     count * the heuristic avg glyph width) must not overflow
     _SAFE_AREA_WIDTH_FRAC of the frame. No-op if there's no hook at all."""
     if hook is None:
         return None
     title = hook.title
-    if len(title) > _SAFE_AREA_MAX_CHARS:
+    if len(title) > SAFE_AREA_MAX_CHARS:
         return QAFail(
             code="SAFE_AREA",
-            detail=f"hook title is {len(title)} chars, max {_SAFE_AREA_MAX_CHARS}",
+            detail=f"hook title is {len(title)} chars, max {SAFE_AREA_MAX_CHARS}",
             route_to=_ROUTE["SAFE_AREA"],
         )
     estimated_width = len(title) * _SAFE_AREA_AVG_CHAR_WIDTH_PX

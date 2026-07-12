@@ -7,9 +7,9 @@ import json
 
 from shorts.agent_log import AgentLog
 from shorts.agents import hooks
-from shorts.agents.hooks import _fallback, _violations
+from shorts.agents.hooks import _SAFE_AREA_MAX_CHARS, _fallback, _violations
 from shorts.agents.hooks import write as hooks_write
-from shorts.qa import _check_safe_area
+from shorts.qa import SAFE_AREA_MAX_CHARS, _check_safe_area
 from shorts.types import Cut, Curve, MediaInfo, SignalIndex, Word
 
 
@@ -297,3 +297,54 @@ def test_clean_title_passes():
     """A clean title should pass all checks."""
     violations = _violations("Amazing Tech Tips Today", {"tiktok": "x", "reels": "y", "shorts": "z"})
     assert violations == [], f"Expected clean title, got violations: {violations}"
+
+
+# --- SAFE_AREA char budget: the bug this file was written to prevent -------
+
+
+def test_hooks_and_qa_share_the_same_safe_area_constant():
+    """hooks.py imports its char cap from qa.py rather than redefining it --
+    this asserts they can never diverge (the root cause of the original bug:
+    an 8-word title could still be longer than qa's SAFE_AREA char limit)."""
+    assert _SAFE_AREA_MAX_CHARS is SAFE_AREA_MAX_CHARS
+    assert _SAFE_AREA_MAX_CHARS == 40
+
+
+def test_violations_flags_a_title_within_word_limit_but_over_char_budget():
+    """An 8-word-or-fewer title can still be longer than SAFE_AREA_MAX_CHARS
+    (e.g. "Why Past Societies Collapsed-And Ours Might", 43 chars, 6 words)
+    -- _violations must catch this even though the word-count check passes."""
+    title = "Why Past Societies Collapsed-And Ours Might"
+    assert len(title.split()) <= 8
+    assert len(title) > _SAFE_AREA_MAX_CHARS
+
+    violations = _violations(title, {"tiktok": "x", "reels": "y", "shorts": "z"})
+    assert any("chars, max" in v for v in violations), violations
+
+
+def test_live_title_over_char_budget_reasks_then_falls_back_within_budget(tmp_path, monkeypatch):
+    """A live LLM hook that's within the 8-word cap but over the char budget
+    (real-world example: a 43-char, 6-word hook) must trigger a re-ask, and
+    -- if still too long -- fall back to a title guaranteed within budget."""
+    idx = _mk_index(words=_words("hello world this is a test transcript for fallback purposes"))
+    cut = Cut(t0=0.0, t1=30.0)
+    calls = []
+
+    def fake_complete_json(prompt, schema, agent, log):
+        calls.append(prompt)
+        bad = _good_response()
+        bad["title"] = "Why Past Societies Collapsed-And Ours Might"  # 43 chars, 6 words
+        return bad
+
+    monkeypatch.setattr(hooks, "complete_json", fake_complete_json)
+    log = _log(tmp_path)
+
+    hook = hooks_write(cut, idx, log)
+
+    assert len(calls) == 2
+    assert f"chars, max {_SAFE_AREA_MAX_CHARS}" in calls[1]
+    assert len(hook.title) <= _SAFE_AREA_MAX_CHARS
+    assert hook.title == "Hello World This Is A Test"  # deterministic fallback
+
+    records = _records(log)
+    assert any(r["action"] == "fallback_used" for r in records)
