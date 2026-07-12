@@ -74,7 +74,15 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = response.content[0].text
+        # A response may lead with a ThinkingBlock (extended thinking); the
+        # JSON we want is in the first *text* block, not necessarily content[0].
+        text = next(
+            (b.text for b in response.content if getattr(b, "type", None) == "text"),
+            None,
+        )
+        if text is None:
+            last_error = "no text block in response"
+            continue
         log.emit(
             agent,
             "llm_complete",
