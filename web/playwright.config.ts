@@ -43,6 +43,10 @@ export default defineConfig({
     // `uv run ... shorts run` — minutes of whisper/yt-dlp work, far too
     // heavy for e2e. STUB_WORKER=1 swaps in a no-op worker for this whole
     // dev server process.
-    env: { ...process.env, STUB_WORKER: "1" },
+    //
+    // NEXT_DIST_DIR: a separate build dir from the default `.next` (see
+    // next.config.ts) so this :3100 dev server never shares/corrupts build
+    // state with a developer's own `npm run dev` already running on :3000.
+    env: { ...process.env, STUB_WORKER: "1", NEXT_DIST_DIR: ".next-e2e" },
   },
 });

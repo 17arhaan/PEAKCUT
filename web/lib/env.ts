@@ -56,6 +56,10 @@ const envSchema = z.object({
   // everyone (including a real cron trigger) rather than accepting
   // unauthenticated sweeps.
   CRON_SECRET: optionalGated("CRON_SECRET", "cron sweeper route auth"),
+
+  // Admin dashboard gate (comma-separated emails). lib/admin.ts falls back
+  // to a hardcoded default owner email when unset -- see there.
+  ADMIN_EMAILS: optionalGated("ADMIN_EMAILS", "admin dashboard access gate"),
 });
 
 export type Env = z.infer<typeof envSchema>;
