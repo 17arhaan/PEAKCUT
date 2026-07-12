@@ -5,17 +5,21 @@ vi.mock("@/auth", () => ({ auth: vi.fn() }));
 // createJob's own tests mock the worker singleton directly (not
 // STUB_WORKER=1) so they cover the actual "did createJob call worker.start
 // with the right job" contract, not just "did createJob avoid spawning".
-vi.mock("@/lib/worker", () => ({ worker: { start: vi.fn().mockResolvedValue(undefined) } }));
+// reRenderStyle's tests below mock worker.renderStyle the same way.
+vi.mock("@/lib/worker", () => ({
+  worker: { start: vi.fn().mockResolvedValue(undefined), renderStyle: vi.fn().mockResolvedValue(undefined) },
+}));
 
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { creditLedger, jobs, users } from "@/lib/db/schema";
 import { worker } from "@/lib/worker";
 import { balance } from "@/lib/credits";
-import { createJob } from "./jobs";
+import { createJob, reRenderStyle } from "./jobs";
 
 const mockAuth = vi.mocked(auth);
 const mockWorkerStart = vi.mocked(worker.start);
+const mockWorkerRenderStyle = vi.mocked(worker.renderStyle);
 
 describe("createJob", () => {
   const userId = crypto.randomUUID();
@@ -40,6 +44,7 @@ describe("createJob", () => {
   beforeEach(() => {
     mockAuth.mockReset();
     mockWorkerStart.mockReset().mockResolvedValue(undefined);
+    mockWorkerRenderStyle.mockReset().mockResolvedValue(undefined);
   });
 
   it("inserts a queued job row and starts the worker for a valid URL", async () => {
@@ -209,5 +214,113 @@ describe("createJob", () => {
     expect(ledgerRows).toHaveLength(0);
 
     await db.delete(jobs).where(eq(jobs.id, collidingJobId));
+  });
+});
+
+describe("reRenderStyle", () => {
+  const userId = crypto.randomUUID();
+  const otherUserId = crypto.randomUUID();
+
+  beforeAll(async () => {
+    await db.insert(users).values([
+      { id: userId, email: `restyle-test-${userId}@example.com`, minutesBalance: 1000 },
+      { id: otherUserId, email: `restyle-test-${otherUserId}@example.com`, minutesBalance: 1000 },
+    ]);
+  });
+
+  afterAll(async () => {
+    await db.delete(jobs).where(eq(jobs.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+    await db.delete(users).where(eq(users.id, otherUserId));
+  });
+
+  beforeEach(() => {
+    mockAuth.mockReset();
+    mockWorkerRenderStyle.mockReset().mockResolvedValue(undefined);
+  });
+
+  async function makeJob(status: "queued" | "processing" | "done" | "failed") {
+    const [job] = await db
+      .insert(jobs)
+      .values({ userId, sourceType: "url", sourceUrl: "https://youtube.com/watch?v=x", status })
+      .returning();
+    return job;
+  }
+
+  it("rejects when unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    const job = await makeJob("done");
+
+    await expect(reRenderStyle(job.id, "s2")).rejects.toThrow(/unauthorized/i);
+    expect(mockWorkerRenderStyle).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-owner as not-found", async () => {
+    mockAuth.mockResolvedValue({ user: { id: otherUserId } } as never);
+    const job = await makeJob("done");
+
+    await expect(reRenderStyle(job.id, "s2")).rejects.toThrow(/not found/i);
+    expect(mockWorkerRenderStyle).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown job id as not-found", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+
+    await expect(reRenderStyle(crypto.randomUUID(), "s2")).rejects.toThrow(/not found/i);
+    expect(mockWorkerRenderStyle).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid style", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+    const job = await makeJob("done");
+
+    await expect(reRenderStyle(job.id, "s4")).rejects.toThrow(/invalid style/i);
+    expect(mockWorkerRenderStyle).not.toHaveBeenCalled();
+  });
+
+  it.each(["queued", "processing", "failed"] as const)(
+    "rejects when the job status is '%s' (only 'done' jobs are restyleable)",
+    async (status) => {
+      mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+      const job = await makeJob(status);
+
+      await expect(reRenderStyle(job.id, "s2")).rejects.toThrow(/completed/i);
+      expect(mockWorkerRenderStyle).not.toHaveBeenCalled();
+
+      const [row] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+      expect(row.status).toBe(status); // untouched -- guard runs before any write
+    },
+  );
+
+  it("on a done job: flips status to processing and calls worker.renderStyle with the right args, no credit charge", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+    const job = await makeJob("done");
+    const balanceBefore = await balance(userId);
+
+    await reRenderStyle(job.id, "s2");
+
+    expect(mockWorkerRenderStyle).toHaveBeenCalledTimes(1);
+    const call = mockWorkerRenderStyle.mock.calls[0][0];
+    expect(call.id).toBe(job.id);
+    expect(call.style).toBe("s2");
+    expect(call.workdir).toContain(job.id);
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(row.status).toBe("processing");
+
+    // ponytail: restyle is free -- no debit/refund touches the balance.
+    expect(await balance(userId)).toBe(balanceBefore);
+  });
+
+  it("marks the job failed when worker.renderStyle rejects", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+    const job = await makeJob("done");
+    mockWorkerRenderStyle.mockRejectedValueOnce(new Error("render spawn failed"));
+
+    await expect(reRenderStyle(job.id, "s3")).rejects.toThrow(/render spawn failed/);
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(row.status).toBe("failed");
+    expect(row.error).toBe("render spawn failed");
   });
 });

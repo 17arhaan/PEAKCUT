@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentEvents, clips, jobs } from "@/lib/db/schema";
 import { estimatedMinutesFor, reconcile, refund } from "@/lib/credits";
@@ -186,6 +186,144 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
   } catch (err) {
     console.error(`[job ${jobId}] reconcile error:`, err);
   }
+}
+
+/**
+ * W11 caption-style switcher's sibling to importRun: reads run-<style>.json
+ * (written by `shorts render --from <workdir> --style <style>`, which
+ * reuses the original run's persisted signals/cuts -- no re-transcription
+ * or crew) and swaps ONLY the existing clip rows' media keys
+ * (r2Key/thumbKey) to the freshly rendered files. Never inserts or deletes
+ * clip rows, and never writes score/hook/captions/evidence/qa/status even
+ * though run-<style>.json's clip entries carry those fields too (same
+ * RunJsonSchema shape as a full run) -- a restyle changes how a clip is
+ * captioned, not its score or its survival. No credit reconcile/refund
+ * here, unlike importRun -- restyle is free (ponytail: revisit if render
+ * compute matters). Same never-throws contract as importRun: every failure
+ * path lands as jobs.status='failed'/jobs.error, caught by LocalWorker's
+ * renderStyle exit handler.
+ */
+export async function importStyleRun(jobId: string, workdir: string, style: string): Promise<void> {
+  try {
+    await doImportStyle(jobId, workdir, style);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db
+      .update(jobs)
+      .set({ status: "failed", error: message.slice(0, 2000), updatedAt: new Date() })
+      .where(eq(jobs.id, jobId));
+  }
+}
+
+async function doImportStyle(jobId: string, workdir: string, style: string): Promise<void> {
+  const raw = await readFile(path.join(workdir, `run-${style}.json`), "utf8");
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`run-${style}.json is not valid JSON: ${(err as Error).message}`);
+  }
+
+  const version = (parsed as { version?: unknown } | null)?.version;
+  if (version !== 1) {
+    throw new Error(`run-${style}.json version mismatch: expected 1, got ${JSON.stringify(version)}`);
+  }
+
+  if (parsed !== null && typeof parsed === "object" && "error" in parsed) {
+    const result = RunErrorSchema.safeParse(parsed);
+    if (!result.success) {
+      throw new Error(`run-${style}.json error-shape failed validation: ${result.error.message}`);
+    }
+    throw new Error(result.data.error.message);
+  }
+
+  const result = RunJsonSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(`run-${style}.json failed schema validation: ${result.error.message}`);
+  }
+  const run = result.data;
+
+  const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+  if (!jobRow) {
+    throw new Error(`job ${jobId} not found`);
+  }
+  const userId = jobRow.userId;
+
+  // Restyle describes the SAME clips (reused signals/cuts) -- only entries
+  // that already have a row survive. Anything in run-<style>.json that
+  // doesn't match an existing (jobId, clipIndex) row is ignored rather than
+  // inserted, guarding the "restyle never changes clip count" invariant.
+  const existingRows = await db.select({ clipIndex: clips.clipIndex }).from(clips).where(eq(clips.jobId, jobId));
+  const existingIndexes = new Set(existingRows.map((c) => c.clipIndex));
+
+  const updates: { clipIndex: number; mp4Key: string | null; thumbKey: string | null }[] = [];
+  const copiedKeys: { mp4Key: string | null; thumbKey: string | null }[] = [];
+  try {
+    for (const clip of run.clips) {
+      if (!existingIndexes.has(clip.index)) continue;
+      const keys = await copyStyleClipFiles(userId, jobId, style, clip);
+      copiedKeys.push(keys);
+      updates.push({ clipIndex: clip.index, ...keys });
+    }
+  } catch (err) {
+    await cleanupCopiedKeys(copiedKeys);
+    throw err;
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      for (const u of updates) {
+        await tx
+          .update(clips)
+          .set({ r2Key: u.mp4Key, thumbKey: u.thumbKey })
+          .where(and(eq(clips.jobId, jobId), eq(clips.clipIndex, u.clipIndex)));
+      }
+
+      // status='done' flipped LAST, same reasoning as doImport: a polling
+      // client never observes 'done' with a partially-swapped clip grid.
+      await tx
+        .update(jobs)
+        .set({
+          activeStyle: style as "s1" | "s2" | "s3",
+          status: "done",
+          stage: "render",
+          progress: 1,
+          error: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(jobs.id, jobId));
+    });
+  } catch (err) {
+    await cleanupCopiedKeys(copiedKeys);
+    throw err;
+  }
+}
+
+/**
+ * Copies a clip's restyled render + thumb into storage, re-keyed with the
+ * style suffix (u/<userId>/<jobId>/clip_<i>_<style>.mp4) so a later restyle
+ * to a different style doesn't collide with this one's files. ponytail: a
+ * prior style's now-orphaned clip_<i>_<otherStyle>.mp4 is not garbage
+ * collected -- acceptable v1 disk cost; add cleanup if storage pressure
+ * ever matters.
+ */
+async function copyStyleClipFiles(
+  userId: string,
+  jobId: string,
+  style: string,
+  clip: ClipEntry,
+): Promise<{ mp4Key: string | null; thumbKey: string | null }> {
+  const mp4Key = clip.paths.mp4
+    ? await copyIntoStorage(clip.paths.mp4, `u/${userId}/${jobId}/clip_${clip.index}_${style}.mp4`)
+    : null;
+  const thumbKey = clip.paths.thumb
+    ? await copyIntoStorage(
+        clip.paths.thumb,
+        `u/${userId}/${jobId}/clip_${clip.index}_${style}_thumb${path.extname(clip.paths.thumb) || ".jpg"}`,
+      )
+    : null;
+  return { mp4Key, thumbKey };
 }
 
 async function readAgentEvents(outDir: string) {

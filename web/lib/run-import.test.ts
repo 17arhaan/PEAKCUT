@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { agentEvents, clips, jobs, users } from "@/lib/db/schema";
 import { balance, debit } from "@/lib/credits";
-import { importRun } from "@/lib/run-import";
+import { importRun, importStyleRun } from "@/lib/run-import";
 import { resolveStoragePath, storage } from "@/lib/storage";
 import { RunJsonSchema } from "@/lib/types";
 
@@ -337,5 +337,144 @@ describe("importRun: cost accounting", () => {
 
     const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(jobRow.costCents).toBe(16); // round(12.5 + 3.5)
+  });
+});
+
+// W11 caption-style switcher. Seeds a 'done' job with a clip row directly
+// (not via importRun) so these tests exercise importStyleRun in isolation --
+// the original clip's score/hook/evidence/qa below stand in for "whatever
+// the original run produced" and must survive a restyle untouched.
+async function seedDoneJobWithClip() {
+  const { userId, jobId, outDir } = await setup();
+  await db.insert(clips).values({
+    jobId,
+    clipIndex: 1,
+    tStart: 0.1,
+    tEnd: 4.9,
+    score: 55,
+    hook: "Original Hook",
+    captions: { tiktok: "orig" },
+    evidence: {
+      score: { total: 55, verdict: "keep", components: {} },
+      candidate: { t0: 0, t1: 5, source: "fallback", notes: "", evidence: [] },
+      repairs: [],
+    },
+    qa: { passed: true, failures: [] },
+    r2Key: `u/${userId}/${jobId}/clip_1.mp4`,
+    thumbKey: `u/${userId}/${jobId}/clip_1_thumb.jpg`,
+    status: "ready",
+    droppedReason: null,
+  });
+  await db.update(jobs).set({ status: "done" }).where(eq(jobs.id, jobId));
+  return { userId, jobId, outDir };
+}
+
+describe("importStyleRun: swaps only clip media", () => {
+  it("updates media keys + activeStyle without touching score/hook/captions/evidence/qa/clip count, and charges no credits", async () => {
+    const { userId, jobId, outDir } = await seedDoneJobWithClip();
+    cleanupTargets.push({ userId, jobId, outDir });
+    const balanceBefore = await balance(userId);
+
+    const styleMp4 = path.join(outDir, "restyled_clip_1.mp4");
+    const styleThumb = path.join(outDir, "restyled_clip_1_thumb.jpg");
+    await writeFile(styleMp4, "styled-mp4-bytes");
+    await writeFile(styleThumb, "styled-thumb-bytes");
+
+    // Deliberately DIFFERENT score/hook/qa than the original clip row --
+    // proves importStyleRun ignores these fields even though run-s2.json
+    // carries them (same RunJsonSchema envelope as a full run.json).
+    const runStyle = makeRun([
+      makeClip({
+        index: 1,
+        score: { total: 999, verdict: "keep", components: {} },
+        hook: { title: "SHOULD NOT APPEAR", captions: { tiktok: "nope" } },
+        qa: { passed: false, failures: [{ code: "X", detail: "y" }] },
+        paths: { mp4: styleMp4, thumb: styleThumb },
+      }),
+    ]);
+    await writeFile(path.join(outDir, "run-s2.json"), JSON.stringify(runStyle));
+
+    await importStyleRun(jobId, outDir, "s2");
+
+    const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(jobRow.status).toBe("done");
+    expect(jobRow.activeStyle).toBe("s2");
+
+    const rows = await db.select().from(clips).where(eq(clips.jobId, jobId));
+    expect(rows).toHaveLength(1); // clip count unchanged
+
+    const [row] = rows;
+    expect(row.r2Key).toBe(`u/${userId}/${jobId}/clip_1_s2.mp4`);
+    expect(row.thumbKey).toBe(`u/${userId}/${jobId}/clip_1_s2_thumb.jpg`);
+    await expect(readFile(resolveStoragePath(row.r2Key!), "utf8")).resolves.toBe("styled-mp4-bytes");
+    await expect(readFile(resolveStoragePath(row.thumbKey!), "utf8")).resolves.toBe("styled-thumb-bytes");
+
+    // Untouched -- restyle only swaps media.
+    expect(row.score).toBe(55);
+    expect(row.hook).toBe("Original Hook");
+    expect(row.captions).toEqual({ tiktok: "orig" });
+    expect(row.qa).toEqual({ passed: true, failures: [] });
+    expect(row.status).toBe("ready");
+
+    // No debit/refund -- restyle is free.
+    expect(await balance(userId)).toBe(balanceBefore);
+  });
+
+  it("ignores a run-<style>.json clip entry with no matching existing clip row (never inserts a new one)", async () => {
+    const { userId, jobId, outDir } = await seedDoneJobWithClip();
+    cleanupTargets.push({ userId, jobId, outDir });
+
+    const styleMp4 = path.join(outDir, "restyled_clip_1.mp4");
+    await writeFile(styleMp4, "styled-mp4-bytes");
+
+    // Index 2 has no corresponding clips row -- must be ignored, not inserted.
+    const runStyle = makeRun([
+      makeClip({ index: 1, paths: { mp4: styleMp4, thumb: null } }),
+      makeClip({ index: 2, paths: { mp4: styleMp4, thumb: null } }),
+    ]);
+    await writeFile(path.join(outDir, "run-s1.json"), JSON.stringify(runStyle));
+
+    await importStyleRun(jobId, outDir, "s1");
+
+    const rows = await db.select().from(clips).where(eq(clips.jobId, jobId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].clipIndex).toBe(1);
+    expect(rows[0].r2Key).toBe(`u/${userId}/${jobId}/clip_1_s1.mp4`);
+  });
+
+  it("is idempotent: re-applying the same style does not duplicate rows or error", async () => {
+    const { userId, jobId, outDir } = await seedDoneJobWithClip();
+    cleanupTargets.push({ userId, jobId, outDir });
+
+    const styleMp4 = path.join(outDir, "restyled_clip_1.mp4");
+    await writeFile(styleMp4, "styled-mp4-bytes");
+    const runStyle = makeRun([makeClip({ index: 1, paths: { mp4: styleMp4, thumb: null } })]);
+    await writeFile(path.join(outDir, "run-s3.json"), JSON.stringify(runStyle));
+
+    await importStyleRun(jobId, outDir, "s3");
+    await importStyleRun(jobId, outDir, "s3");
+
+    const rows = await db.select().from(clips).where(eq(clips.jobId, jobId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].r2Key).toBe(`u/${userId}/${jobId}/clip_1_s3.mp4`);
+
+    const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(jobRow.activeStyle).toBe("s3");
+    expect(jobRow.status).toBe("done");
+  });
+
+  it("marks the job failed (not the process) when run-<style>.json is missing, without touching clip rows", async () => {
+    const { userId, jobId, outDir } = await seedDoneJobWithClip();
+    cleanupTargets.push({ userId, jobId, outDir });
+
+    await expect(importStyleRun(jobId, outDir, "s1")).resolves.toBeUndefined();
+
+    const [jobRow] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(jobRow.status).toBe("failed");
+    expect(jobRow.error).toBeTruthy();
+
+    const rows = await db.select().from(clips).where(eq(clips.jobId, jobId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].r2Key).toBe(`u/${userId}/${jobId}/clip_1.mp4`); // unchanged
   });
 });

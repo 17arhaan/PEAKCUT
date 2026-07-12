@@ -6,7 +6,7 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
 import { assertOwnedKey } from "@/lib/storage";
-import { worker } from "@/lib/worker";
+import { worker, type CaptionStyle } from "@/lib/worker";
 import { debit, InsufficientCreditsError, refund } from "@/lib/credits";
 
 export interface CreateJobInput {
@@ -18,6 +18,19 @@ export interface CreateJobInput {
 // scratch space, not served back to the browser) but under the same
 // gitignored .data/ tree.
 const WORK_ROOT = path.join(process.cwd(), ".data", "work");
+
+/**
+ * The job's workdir isn't persisted on the jobs row -- it's derived
+ * deterministically from jobId (same convention createJob has always used
+ * for `outDir`), so reRenderStyle below can hand LocalWorker.renderStyle the
+ * same directory createJob's LocalWorker.start originally wrote run.json
+ * into, without a schema migration to store it.
+ */
+function jobWorkDir(jobId: string): string {
+  return path.join(WORK_ROOT, jobId);
+}
+
+const CAPTION_STYLES: readonly CaptionStyle[] = ["s1", "s2", "s3"];
 
 // The real minutes amount isn't knowable at job-creation time (video
 // duration is discovered during ingest) -- reconcile() corrects the charge
@@ -68,7 +81,7 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
   }
 
   const jobId = crypto.randomUUID();
-  const outDir = path.join(WORK_ROOT, jobId);
+  const outDir = jobWorkDir(jobId);
 
   // Debit and job-row insert MUST commit or roll back together: if the
   // insert fails (PK collision, transient DB error) after a standalone
@@ -112,4 +125,55 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
   }
 
   return { jobId };
+}
+
+/**
+ * W11 caption-style switcher: re-renders a finished job's clips in a
+ * different karaoke caption preset without re-running ingest/signals/crew --
+ * `worker.renderStyle` reuses the persisted signals/cuts already on disk at
+ * the job's workdir. Guarded to owner + `status === 'done'` jobs only (a
+ * queued/processing job has no run.json to re-render from yet; a failed job
+ * has none either). Not-found and not-owned collapse to the same error, same
+ * pattern as getJobStatusForOwner (lib/job-status.ts) -- a non-owner can't
+ * distinguish "doesn't exist" from "isn't yours".
+ *
+ * ponytail: restyle is free -- no crew/whisper cost, just a fast re-render
+ * of already-scored clips. No debit/refund here (unlike createJob). Revisit
+ * if render compute ever needs metering.
+ */
+export async function reRenderStyle(jobId: string, style: string): Promise<void> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) {
+    throw new Error("unauthorized");
+  }
+
+  if (!CAPTION_STYLES.includes(style as CaptionStyle)) {
+    throw new Error(`invalid style: ${style}`);
+  }
+
+  const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+  if (!job || job.userId !== userId) {
+    throw new Error("job not found");
+  }
+
+  if (job.status !== "done") {
+    throw new Error("only a completed job can be restyled");
+  }
+
+  await db
+    .update(jobs)
+    .set({ status: "processing", stage: "restyle", progress: 0, updatedAt: new Date() })
+    .where(eq(jobs.id, jobId));
+
+  try {
+    await worker.renderStyle({ id: jobId, workdir: jobWorkDir(jobId), style: style as CaptionStyle });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "unknown worker error";
+    await db
+      .update(jobs)
+      .set({ status: "failed", error: errorMsg, updatedAt: new Date() })
+      .where(eq(jobs.id, jobId));
+    throw err;
+  }
 }

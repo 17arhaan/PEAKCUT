@@ -42,6 +42,13 @@ export const jobs = pgTable("jobs", {
   error: text("error"),
   durationMin: real("duration_min"),
   costCents: integer("cost_cents"),
+  // W11 caption-style switcher: which of the 3 karaoke presets (s1/s2/s3)
+  // the clip grid is currently showing. Null until the first restyle --
+  // the original render's caption style isn't tracked as one of s1/s2/s3.
+  // SIMPLEST honest v1 (see web-task-11-brief.md): media keys are swapped
+  // in place (lib/run-import.ts's importStyleRun), no separate style-variant
+  // rows -- this column is just "which style is the media currently in".
+  activeStyle: text("active_style").$type<"s1" | "s2" | "s3">(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

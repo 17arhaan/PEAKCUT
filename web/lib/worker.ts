@@ -5,7 +5,13 @@ import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
-import { importRun } from "@/lib/run-import";
+import { importRun, importStyleRun } from "@/lib/run-import";
+
+// The three karaoke caption presets `shorts render --style` accepts (W11
+// brief). A plain string union, not a runtime const array here -- the one
+// place a style string from user input needs validating is actions/jobs.ts,
+// which owns its own literal list right next to the error message it throws.
+export type CaptionStyle = "s1" | "s2" | "s3";
 
 /**
  * Worker seam. `worker` is the object other app code should call — a
@@ -15,6 +21,14 @@ import { importRun } from "@/lib/run-import";
  */
 export interface Worker {
   start(job: { id: string; source: string; outDir: string }): Promise<void>;
+  /**
+   * Re-renders a prior run's clips in a different caption style, reusing
+   * the persisted signals/cuts already on disk at `workdir` (no
+   * re-transcription/crew — `shorts render --from <workdir> --style
+   * <style>`). Writes run-<style>.json + clips-<style>/ into that same
+   * workdir; importStyleRun (lib/run-import.ts) picks it up on exit.
+   */
+  renderStyle(job: { id: string; workdir: string; style: CaptionStyle }): Promise<void>;
 }
 
 // repoRoot/worker is the Python pipeline. Next always runs with cwd = this
@@ -210,6 +224,56 @@ export class LocalWorker implements Worker {
 
     child.unref();
   }
+
+  // ponytail: reuses start()'s "spawn detached, stdio to a log file, import
+  // on exit" shape verbatim -- just a different CLI subcommand, a per-style
+  // log (so a restyle doesn't interleave with the original run's
+  // worker.log), and importStyleRun instead of importRun. No tailAgentEvents
+  // call: `shorts render --style` reuses persisted signals/cuts (no
+  // LLM/whisper crew), so there's no agent_events.jsonl progress to tail --
+  // the job just sits at whatever stage/progress reRenderStyle (the caller,
+  // actions/jobs.ts) set before invoking this.
+  async renderStyle(job: { id: string; workdir: string; style: CaptionStyle }): Promise<void> {
+    const { id: jobId, workdir, style } = job;
+
+    const logPath = path.join(workdir, `restyle-${style}.log`);
+    const logFd = openSync(logPath, "a");
+
+    const child = spawn(
+      "uv",
+      ["run", "--project", WORKER_PROJECT, "shorts", "render", "--from", workdir, "--style", style],
+      { detached: true, stdio: ["ignore", logFd, logFd] },
+    );
+    closeSync(logFd);
+
+    child.on("exit", async (code) => {
+      try {
+        const runJsonPath = path.join(workdir, `run-${style}.json`);
+        try {
+          await stat(runJsonPath);
+          await importStyleRun(jobId, workdir, style);
+        } catch {
+          const tail = await stderrTail(logPath);
+          await markFailed(
+            jobId,
+            tail || `shorts render exited with code ${code ?? "unknown"} and produced no run-${style}.json`,
+          );
+        }
+      } catch (err) {
+        console.error(`[job ${jobId}] renderStyle exit handler error:`, err);
+      }
+    });
+
+    child.on("error", async (err) => {
+      try {
+        await markFailed(jobId, err.message);
+      } catch (dbErr) {
+        console.error(`[job ${jobId}] renderStyle error handler DB write failed:`, dbErr);
+      }
+    });
+
+    child.unref();
+  }
 }
 
 // ponytail: ModalWorker lands with the Modal token (lib/env.ts's
@@ -228,6 +292,13 @@ class StubWorker implements Worker {
       .set({ status: "processing", stage: "ingest", progress: 0, updatedAt: new Date() })
       .where(eq(jobs.id, job.id));
   }
+
+  // No-op: reRenderStyle (actions/jobs.ts) already flips the job to
+  // 'processing' before calling this, and StubWorker never produces a
+  // run-<style>.json -- under STUB_WORKER the job simply stays
+  // 'processing', same as start() leaves a job at 'processing'/'ingest'
+  // rather than simulating a full run through to 'done'.
+  async renderStyle(): Promise<void> {}
 }
 
 export const worker: Worker = process.env.STUB_WORKER === "1" ? new StubWorker() : new LocalWorker();

@@ -11,6 +11,7 @@ const STAGE_LABELS: Record<string, string> = {
   signals: "Analyzing audio & video",
   crew: "Finding the best moments",
   render: "Rendering clips",
+  restyle: "Applying new caption style",
 };
 
 function titleCase(s: string): string {

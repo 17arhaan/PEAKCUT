@@ -7,10 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { ClipEvidence } from "@/app/jobs/[jobId]/ClipEvidence";
+import { reRenderStyle } from "@/actions/jobs";
 import { humanizeEvent, humanizeStage } from "@/lib/job-events";
 import type { JobStatus, JobStatusClip } from "@/lib/job-status";
+import type { CaptionStyle } from "@/lib/worker";
 
 const POLL_INTERVAL_MS = 2000;
+const CAPTION_STYLES: readonly CaptionStyle[] = ["s1", "s2", "s3"];
+const STYLE_LABELS: Record<CaptionStyle, string> = { s1: "Style 1", s2: "Style 2", s3: "Style 3" };
 
 function isTerminal(status: JobStatus["status"]): boolean {
   return status === "done" || status === "failed";
@@ -95,12 +99,88 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
       ) : null}
 
       {hasClips ? (
+        <StyleSelector
+          jobId={jobId}
+          activeStyle={data.active_style}
+          jobStatus={data.status}
+          onRestyled={setData}
+        />
+      ) : null}
+
+      {hasClips ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.clips.map((clip) => (
             <ClipCard key={clip.index} clip={clip} />
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * W11 caption-style switcher: re-renders the clip grid's media in a
+ * different karaoke caption preset without re-running the pipeline. Only
+ * enabled when the job is 'done' (reRenderStyle server-side rejects any
+ * other status) -- `jobStatus` alone gates both the buttons and the
+ * "Applying…" indicator below, so there's no separate pending flag to
+ * reconcile against the poll: the moment onRestyled reports a non-'done'
+ * status, the indicator shows; the moment it's 'done' again, it doesn't.
+ * `pendingStyle` only remembers WHICH style is in flight for that label --
+ * it's set optimistically on click (before the server action round-trips),
+ * which matters for e2e under STUB_WORKER (lib/worker.ts's
+ * StubWorker.renderStyle is a no-op, so the job never reaches 'done' again
+ * on its own -- the test only needs to observe 'processing' + the label).
+ */
+function StyleSelector({
+  jobId,
+  activeStyle,
+  jobStatus,
+  onRestyled,
+}: {
+  jobId: string;
+  activeStyle: JobStatus["active_style"];
+  jobStatus: JobStatus["status"];
+  onRestyled: (next: JobStatus) => void;
+}) {
+  const [pendingStyle, setPendingStyle] = useState<CaptionStyle | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick(style: CaptionStyle) {
+    setError(null);
+    setPendingStyle(style);
+    try {
+      await reRenderStyle(jobId, style);
+      const res = await fetch(`/api/jobs/${jobId}/status`);
+      if (res.ok) onRestyled(await res.json());
+    } catch (err) {
+      setPendingStyle(null);
+      setError(err instanceof Error ? err.message : "Restyle failed");
+    }
+  }
+
+  const canRestyle = jobStatus === "done";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground">Caption style:</span>
+        {CAPTION_STYLES.map((style) => (
+          <Button
+            key={style}
+            size="sm"
+            variant={activeStyle === style ? "default" : "outline"}
+            disabled={!canRestyle}
+            onClick={() => handleClick(style)}
+          >
+            {STYLE_LABELS[style]}
+          </Button>
+        ))}
+      </div>
+      {pendingStyle && jobStatus === "processing" ? (
+        <p className="text-sm text-muted-foreground">Applying {STYLE_LABELS[pendingStyle]}…</p>
+      ) : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

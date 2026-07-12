@@ -34,6 +34,10 @@ export interface JobStatus {
   stage: string | null;
   progress: number;
   error: string | null;
+  // W11: which karaoke caption preset (s1/s2/s3) the clip grid is currently
+  // showing -- null until the first restyle (see lib/db/schema.ts's
+  // jobs.activeStyle doc comment).
+  active_style: "s1" | "s2" | "s3" | null;
   clips: JobStatusClip[];
   events: JobStatusEvent[];
 }
@@ -67,6 +71,7 @@ export async function getJobStatusForOwner(jobId: string, userId: string): Promi
     stage: job.stage,
     progress: job.progress,
     error: job.error,
+    active_style: job.activeStyle,
     clips: clipRows.map((clip) => ({
       index: clip.clipIndex,
       status: clip.status,
