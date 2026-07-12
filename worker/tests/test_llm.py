@@ -235,3 +235,29 @@ def test_live_smoke_scout_schema(tmp_path):
     )
     result = complete_json(prompt, schema, "scout", log)
     assert isinstance(result.get("evidence"), list)
+
+
+def test_extract_json_strips_code_fences():
+    from shorts.agents.llm import _extract_json
+
+    assert json.loads(_extract_json('```json\n{"evidence": []}\n```')) == {"evidence": []}
+    assert json.loads(_extract_json('```\n{"evidence": [1]}\n```')) == {"evidence": [1]}
+
+
+def test_extract_json_pulls_object_out_of_prose():
+    from shorts.agents.llm import _extract_json
+
+    raw = 'Here is the result:\n{"evidence": []}\nHope that helps!'
+    assert json.loads(_extract_json(raw)) == {"evidence": []}
+
+
+def test_complete_json_handles_fenced_response(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHORTS_LLM", "live")
+    log = AgentLog(tmp_path / "log.jsonl")
+    mock_client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kw: _response('```json\n{"evidence": []}\n```')
+        )
+    )
+    with patch("shorts.agents.llm.anthropic.Anthropic", return_value=mock_client):
+        assert complete_json("prompt", SCHEMA, "scout", log) == {"evidence": []}

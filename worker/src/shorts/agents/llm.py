@@ -7,6 +7,7 @@ it and fall back to their deterministic, no-LLM path. This is what makes
 
 import json
 import os
+import re
 
 import anthropic
 
@@ -52,6 +53,26 @@ def _validate_schema(data: object, schema: dict) -> bool:
     return True
 
 
+def _extract_json(raw: str) -> str:
+    """Pull the JSON out of a real model reply, which may wrap it in markdown
+    ```json fences or surround it with prose. Falls back to the raw text.
+
+    ponytail: string surgery, not a full parser; the loud json.loads failure
+    still catches anything this misses."""
+    s = raw.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
+        s = re.sub(r"\n?```\s*$", "", s).strip()
+    if s[:1] not in "{[":
+        starts = [i for i in (s.find("{"), s.find("[")) if i != -1]
+        if starts:
+            start = min(starts)
+            end = s.rfind("}" if s[start] == "{" else "]")
+            if end > start:
+                s = s[start : end + 1]
+    return s
+
+
 def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
     """Complete `prompt` via the Anthropic API and return JSON matching
     `schema`. Retries once if the model's response is invalid JSON or fails
@@ -85,9 +106,9 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
             (b.text for b in response.content if getattr(b, "type", None) == "text"),
             None,
         )
-        if text is None:
+        if text is None or not text.strip():
             stop = getattr(response, "stop_reason", None)
-            last_error = f"no text block (stop_reason={stop} — truncated during thinking)"
+            last_error = f"empty/no text block (stop_reason={stop} — likely truncated during thinking)"
             continue
         log.emit(
             agent,
@@ -96,10 +117,11 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
             tokens_in=response.usage.input_tokens,
             tokens_out=response.usage.output_tokens,
         )
+        candidate = _extract_json(text)
         try:
-            data = json.loads(text)
+            data = json.loads(candidate)
         except json.JSONDecodeError as e:
-            last_error = f"invalid JSON: {e}"
+            last_error = f"invalid JSON: {e}; head={candidate[:120]!r}"
             prompt = (
                 f"{prompt}\n\nYour previous response was not valid JSON ({e}). "
                 "Respond with ONLY valid JSON matching the requested schema."
