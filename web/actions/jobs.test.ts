@@ -349,7 +349,7 @@ describe("reRenderStyle", () => {
 
     // The other should reject with the not-done error.
     expect(result2.status).toBe("rejected");
-    expect((result2 as any).reason.message).toMatch(/completed/i);
+    expect((result2 as PromiseRejectedResult).reason.message).toMatch(/completed/i);
 
     // The mock should have been called exactly once (by whichever call won).
     expect(renderCalls).toBe(1);
