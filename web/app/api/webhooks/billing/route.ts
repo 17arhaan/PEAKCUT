@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { topUp } from "@/lib/credits";
 import { db } from "@/lib/db";
-import { payments } from "@/lib/db/schema";
+import { payments, users } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 
 // No session on this route -- the caller is an external billing provider,
@@ -99,6 +100,17 @@ export async function POST(request: Request) {
 
   if (!reason) {
     console.log(`[billing webhook] unhandled event type "${event.type}" (event_id=${event.event_id}) -- acked, no-op`);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Pre-check: user must exist before we attempt the transaction. FK violation
+  // on a non-existent user would crash the transaction and cause a retry-storm
+  // (the event would never succeed, triggering infinite provider retries).
+  // If absent, ack the event (200) so the provider stops retrying, but don't
+  // credit anything -- this matches the "unknown event type" pattern above.
+  const [userExists] = await db.select().from(users).where(eq(users.id, event.user_id));
+  if (!userExists) {
+    console.warn(`[billing webhook] unknown user_id "${event.user_id}" (event_id=${event.event_id}) -- acked, no credit`);
     return NextResponse.json({ ok: true });
   }
 

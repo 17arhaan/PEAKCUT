@@ -192,4 +192,59 @@ describe("POST /api/webhooks/billing", () => {
       .where(and(eq(creditLedger.reason, "subscription_renewal"), eq(creditLedger.ref, eventId)));
     expect(ledgerRows).toHaveLength(1);
   });
+
+  it("unknown user_id (valid signature): 200, no payments row, no credit, logs warning", async () => {
+    const unknownUserId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+    const body = JSON.stringify({
+      event_id: eventId,
+      type: "payment.succeeded",
+      user_id: unknownUserId,
+      amount_cents: 500,
+      currency: "usd",
+      minutes: 50,
+    });
+
+    const res = await POST(makeRequest(body));
+
+    expect(res.status).toBe(200);
+    expect(await db.select().from(payments).where(eq(payments.morEventId, eventId))).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(creditLedger)
+        .where(and(eq(creditLedger.userId, unknownUserId), eq(creditLedger.ref, eventId)))
+    ).toHaveLength(0);
+  });
+
+  // MONEY-SAFETY CORE: concurrent duplicate webhook deliveries (two parallel
+  // POSTs with the same event_id) must never double-credit, even under
+  // concurrent execution.
+  it("CONCURRENT duplicate delivery (same event_id, two parallel POSTs): one payments row, one credit, balance bumped once", async () => {
+    const userId = await createUser(0);
+    const eventId = crypto.randomUUID();
+    const body = JSON.stringify({
+      event_id: eventId,
+      type: "payment.succeeded",
+      user_id: userId,
+      amount_cents: 750,
+      currency: "usd",
+      minutes: 75,
+    });
+
+    const [res1, res2] = await Promise.all([POST(makeRequest(body)), POST(makeRequest(body))]);
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(await balanceOf(userId)).toBe(75);
+
+    const paymentRows = await db.select().from(payments).where(eq(payments.morEventId, eventId));
+    expect(paymentRows).toHaveLength(1);
+
+    const ledgerRows = await db
+      .select()
+      .from(creditLedger)
+      .where(and(eq(creditLedger.reason, "purchase"), eq(creditLedger.ref, eventId)));
+    expect(ledgerRows).toHaveLength(1);
+  });
 });
