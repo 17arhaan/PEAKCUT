@@ -109,7 +109,7 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
   }
 
   try {
-    await worker.start({ id: jobId, source, outDir });
+    await worker.start({ id: jobId, source, sourceType, outDir });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "unknown worker error";
     await db

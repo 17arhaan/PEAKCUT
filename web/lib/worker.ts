@@ -5,7 +5,9 @@ import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
+import { estimatedMinutesFor, refund } from "@/lib/credits";
 import { importRun, importStyleRun } from "@/lib/run-import";
+import { resolveStoragePath } from "@/lib/storage";
 
 // The three karaoke caption presets `shorts render --style` accepts (W11
 // brief). A plain string union, not a runtime const array here -- the one
@@ -20,7 +22,21 @@ export type CaptionStyle = "s1" | "s2" | "s3";
  * gated vars) — same shape, different execution backend.
  */
 export interface Worker {
-  start(job: { id: string; source: string; outDir: string }): Promise<void>;
+  /**
+   * `sourceType` distinguishes an http(s) URL source from an upload
+   * storage KEY (lib/storage.ts's u/<userId>/<uploadId>/<filename>
+   * convention). It's on the interface, not just a LocalWorker detail,
+   * because each backend resolves an upload key differently: LocalWorker
+   * turns it into an absolute filesystem path (resolveStoragePath) before
+   * spawning, since the Python pipeline's ingest.resolve() treats any
+   * non-URL source as a local path relative to its own cwd -- the raw
+   * storage key was never a valid path there, which is why every upload
+   * job used to fail with "Local file not found" while URL jobs worked
+   * fine. A future ModalWorker resolves the same key its own way (e.g.
+   * downloading the object from R2) using this same field. A URL source
+   * passes through untouched either way.
+   */
+  start(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void>;
   /**
    * Re-renders a prior run's clips in a different caption style, reusing
    * the persisted signals/cuts already on disk at `workdir` (no
@@ -165,9 +181,51 @@ async function stderrTail(logPath: string): Promise<string> {
   }
 }
 
+/**
+ * Turns an upload-key source into the real absolute filesystem path the
+ * Python pipeline needs (Path(source) in worker/src/shorts/ingest.py's
+ * resolve() -- a non-URL source is treated as a local path, and the raw
+ * storage key u/<userId>/<uploadId>/file.mp4 was never one; the file
+ * actually lives at web/.data/storage/u/.../file.mp4). A URL source passes
+ * through untouched -- ingest.resolve()'s own _is_url check hands it to
+ * yt-dlp. Exported as a pure function so a unit test can assert the
+ * resolution without spawning a child process.
+ */
+export function resolveWorkerSource(source: string, sourceType: "url" | "upload"): string {
+  return sourceType === "upload" ? resolveStoragePath(source) : source;
+}
+
+/**
+ * Refunds jobId's debited estimate when the pipeline crashed before ever
+ * reaching importRun -- no run.json was produced, or the child process
+ * failed to spawn at all. Both paths bypass importRun entirely, so
+ * importRun's own refund-on-failure branch (lib/run-import.ts) never runs
+ * for them, and the sweeper (api/cron/sweep) only refunds jobs still
+ * queued/processing, never one already marked 'failed' here -- without
+ * this, an uncaught whisper/ffmpeg crash or spawn failure permanently
+ * strands the user's debit. Reuses refund's own idempotency key
+ * (reason='job_refund', ref=jobId) -- a job that reaches importRun's
+ * failure path or the sweeper first (or this function running twice) is a
+ * safe no-op, not a double refund. Best-effort: called from a detached
+ * child process handler with nothing to propagate a rejection to, so a
+ * refund failure is logged, not thrown.
+ */
+async function refundOnCrash(jobId: string): Promise<void> {
+  try {
+    const [jobRow] = await db.select({ userId: jobs.userId }).from(jobs).where(eq(jobs.id, jobId));
+    if (!jobRow) return;
+    const estimate = await estimatedMinutesFor(jobRow.userId, jobId);
+    if (estimate > 0) {
+      await refund(jobRow.userId, jobId, estimate);
+    }
+  } catch (err) {
+    console.error(`[job ${jobId}] refund-on-crash error:`, err);
+  }
+}
+
 export class LocalWorker implements Worker {
-  async start(job: { id: string; source: string; outDir: string }): Promise<void> {
-    const { id: jobId, source, outDir } = job;
+  async start(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void> {
+    const { id: jobId, source, sourceType, outDir } = job;
 
     await mkdir(outDir, { recursive: true });
     await db
@@ -182,9 +240,10 @@ export class LocalWorker implements Worker {
     // immediately and the child survives this Next.js process restarting.
     // stdio goes to a log file, not `inherit` — this process's own
     // stdout/stderr isn't the right place for a job's pipeline output.
+    const resolvedSource = resolveWorkerSource(source, sourceType);
     const child = spawn(
       "uv",
-      ["run", "--project", WORKER_PROJECT, "shorts", "run", source, "-o", outDir],
+      ["run", "--project", WORKER_PROJECT, "shorts", "run", resolvedSource, "-o", outDir],
       { detached: true, stdio: ["ignore", logFd, logFd] },
     );
     closeSync(logFd); // child has its own dup of the fd; safe to close ours
@@ -207,6 +266,7 @@ export class LocalWorker implements Worker {
             jobId,
             tail || `pipeline exited with code ${code ?? "unknown"} and produced no run.json`,
           );
+          await refundOnCrash(jobId);
         }
       } catch (err) {
         console.error(`[job ${jobId}] exit handler error:`, err);
@@ -220,6 +280,7 @@ export class LocalWorker implements Worker {
       } catch (dbErr) {
         console.error(`[job ${jobId}] error handler DB write failed:`, dbErr);
       }
+      await refundOnCrash(jobId);
     });
 
     child.unref();
@@ -338,7 +399,7 @@ async function runStubFixture(jobId: string, outDir: string): Promise<void> {
 // this module's `worker` export directly (vi.mock("@/lib/worker", ...)) so
 // createJob's own tests don't depend on this env var.
 class StubWorker implements Worker {
-  async start(job: { id: string; source: string; outDir: string }): Promise<void> {
+  async start(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void> {
     await db
       .update(jobs)
       .set({ status: "processing", stage: "ingest", progress: 0, updatedAt: new Date() })
