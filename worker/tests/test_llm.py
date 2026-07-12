@@ -125,8 +125,9 @@ def test_retry_reprompt_includes_validation_error_and_correct_structure(tmp_path
     assert isinstance(second_call_kw["messages"][0]["content"], str)
     # Check that re-prompt includes the validation error text
     assert "not valid JSON" in second_call_kw["messages"][0]["content"]
-    # Check max_tokens is present and correct
-    assert second_call_kw.get("max_tokens") == 4096
+    # Retry escalates the token ceiling (first attempt 8192, retry 16384) so a
+    # thinking-truncated first attempt has room to fit thinking + JSON.
+    assert second_call_kw.get("max_tokens") == 16384
 
 
 def test_retries_once_on_schema_mismatch_then_succeeds(tmp_path, monkeypatch):

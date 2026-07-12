@@ -68,10 +68,15 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
     client = anthropic.Anthropic()
 
     last_error = "unknown error"
+    # Escalating budgets: claude-sonnet-5 can lead with a thinking block, which
+    # on a large transcript chunk consumes the whole budget and truncates BEFORE
+    # the JSON text block is emitted (stop_reason="max_tokens", no text block).
+    # A bigger ceiling on retry gives thinking + JSON room to both fit.
+    max_tokens_per_attempt = (8192, 16384)
     for attempt in range(2):
         response = client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=max_tokens_per_attempt[attempt],
             messages=[{"role": "user", "content": prompt}],
         )
         # A response may lead with a ThinkingBlock (extended thinking); the
@@ -81,7 +86,8 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
             None,
         )
         if text is None:
-            last_error = "no text block in response"
+            stop = getattr(response, "stop_reason", None)
+            last_error = f"no text block (stop_reason={stop} — truncated during thinking)"
             continue
         log.emit(
             agent,
