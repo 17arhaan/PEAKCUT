@@ -3,6 +3,7 @@ token/cost accounting -- the audit trail for what each agent did and what
 it cost."""
 
 import json
+import threading
 from pathlib import Path
 
 # ponytail: pricing constants -- update these when Anthropic pricing
@@ -20,6 +21,9 @@ class AgentLog:
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
+        # emit() is called concurrently once the Critic scores candidates in
+        # parallel -- serialize the appends so records never interleave.
+        self._lock = threading.Lock()
 
     def emit(
         self,
@@ -36,8 +40,9 @@ class AgentLog:
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
         }
-        with self.path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        line = json.dumps(record) + "\n"
+        with self._lock, self.path.open("a") as f:
+            f.write(line)
 
     def totals(self) -> dict[str, dict]:
         """Per-agent tokens and estimated cost (cents) at current pricing."""

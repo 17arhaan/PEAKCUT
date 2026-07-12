@@ -10,6 +10,8 @@ run_crew still returns a best-effort set so the pipeline never ships zero
 clips -- see _best_effort.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 from shorts.agent_log import AgentLog
 from shorts.agents.critic import score as critic_score
 from shorts.agents.scout import candidates as scout_candidates, fallback_candidates, _iou
@@ -17,6 +19,19 @@ from shorts.types import Candidate, Scored, SignalIndex
 
 MAX_ROUNDS = 2
 BEST_EFFORT_N = 4
+# The Critic scores each candidate with an independent LLM call, so a round's
+# candidates are scored concurrently -- the crew is call-bound, and this is the
+# single biggest wall-clock win. Bounded to stay well under API rate limits.
+_CRITIC_WORKERS = 6
+
+
+def _score_candidates(cands: list[Candidate], idx: SignalIndex, log: AgentLog) -> list[Scored]:
+    """Critic-score every candidate, in parallel, preserving input order. An
+    LLM error on any one propagates (same as the sequential path did)."""
+    if not cands:
+        return []
+    with ThreadPoolExecutor(max_workers=min(_CRITIC_WORKERS, len(cands))) as pool:
+        return list(pool.map(lambda c: critic_score(c, idx, log), cands))
 
 
 def _log_verdict(log: AgentLog, s: Scored, round_i: int) -> None:
@@ -49,7 +64,7 @@ def run_crew(idx: SignalIndex, log: AgentLog) -> list[Scored]:
     cands = scout_candidates(idx, log)
 
     for round_i in range(MAX_ROUNDS):
-        scored = [critic_score(c, idx, log) for c in cands]
+        scored = _score_candidates(cands, idx, log)
         for s in scored:
             _log_verdict(log, s, round_i)
         all_scored.extend(scored)
