@@ -44,12 +44,20 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  nativeButton,
+  render,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // A navigation CTA rendered via `render={<Link/>}` is an anchor, not a
+  // native <button>. Tell Base UI so it applies anchor semantics instead of
+  // erroring that native button semantics were lost (accessibility). Explicit
+  // nativeButton still wins; a plain <Button> keeps Base UI's native default.
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      render={render}
+      nativeButton={nativeButton ?? (render != null ? false : undefined)}
       {...props}
     />
   )
