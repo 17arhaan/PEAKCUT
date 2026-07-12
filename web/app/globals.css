@@ -121,6 +121,12 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body {
+    overscroll-behavior: none;
+    max-width: 100vw;
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground;
   }
@@ -129,16 +135,59 @@
   }
 }
 
+/* Landing type helpers — named classes instead of repeating the
+   `font-[family-name:var(--font-x)]` arbitrary-value utility dozens of
+   times across landing components (that repetition was tripping a
+   Turbopack dev-mode CSS parsing bug; named classes sidestep it and are
+   just cleaner). */
+.font-display {
+  font-family: var(--font-archivo);
+}
+.font-mono-data {
+  font-family: var(--font-plex-mono);
+}
+.font-body {
+  font-family: var(--font-inter);
+}
+
+/* One kinetic type moment on the hero headline — amber-to-violet gradient
+   clipped to text, used on a single key word only. */
+.text-gradient-signal {
+  background: linear-gradient(100deg, var(--signal) 0%, #ffdf8a 40%, var(--pulse) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* Landing page instrument-panel palette. Scoped to .landing so the rest of
    the app (dashboard, auth) keeps the default shadcn theme above. */
 .landing {
   --ink: #0b0e14;
+  --ink-deep: #05070b;
   --panel: #141925;
+  --panel-raised: #181f2e;
   --line: #232a3a;
   --text: #e6e9f0;
   --muted: #8a93a6;
   --signal: #f5b301;
+  --signal-dim: #b8880a;
   --pulse: #7c5cff;
+  position: relative;
+  isolation: isolate;
+}
+
+/* Whole-page ambient wash — breaks up flat black with two very soft, fixed
+   radial gradients so depth reads even outside the hero/card glows. */
+.landing::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 45% at 15% 0%, rgba(245, 179, 1, 0.05), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 100% 40%, rgba(124, 92, 255, 0.05), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 0% 100%, rgba(245, 179, 1, 0.035), transparent 60%);
 }
 
 @keyframes landing-fade-in {
@@ -158,6 +207,133 @@
 
 @media (prefers-reduced-motion: reduce) {
   .landing-fade-in {
+    animation: none;
+  }
+}
+
+/* Soft amber glow utility for key elements (CTA, score badge, highlighted
+   pricing card). Kept as a static shadow, not animated — the glow itself is
+   the accent, no need to also move it. */
+.signal-glow {
+  box-shadow:
+    0 0 0 1px rgba(245, 179, 1, 0.12),
+    0 12px 40px -12px rgba(245, 179, 1, 0.45);
+}
+
+/* Faint film-grain texture, fixed over the whole landing page at very low
+   opacity for print-like depth. Static (not animated) — texture, not motion. */
+.landing-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Rotating conic-gradient border shimmer for the highlighted pricing card. */
+@property --shimmer-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes border-shimmer {
+  to {
+    --shimmer-angle: 360deg;
+  }
+}
+
+.shimmer-border {
+  position: relative;
+}
+
+.shimmer-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--shimmer-angle, 0deg),
+    rgba(245, 179, 1, 0.25) 0%,
+    var(--signal) 6%,
+    rgba(245, 179, 1, 0.25) 14%,
+    rgba(245, 179, 1, 0.25) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: border-shimmer 6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-border::before {
+    animation: none;
+  }
+}
+
+/* Bento grid for the features section — one large "receipts" cell plus five
+   smaller feature cells. Single column on mobile, 2-up on tablet (big cell
+   spans both), full asymmetric layout from lg up. */
+.bento-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .bento-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .bento-big {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1024px) {
+  .bento-grid {
+    grid-template-columns: 1.4fr 1.4fr 1fr;
+    grid-template-areas:
+      "big big c1"
+      "big big c2"
+      "c3 c4 c5";
+  }
+  .bento-big {
+    grid-area: big;
+  }
+  .bento-c1 {
+    grid-area: c1;
+  }
+  .bento-c2 {
+    grid-area: c2;
+  }
+  .bento-c3 {
+    grid-area: c3;
+  }
+  .bento-c4 {
+    grid-area: c4;
+  }
+  .bento-c5 {
+    grid-area: c5;
+  }
+}
+
+/* Ambient oscilloscope trace — a slow traveling pulse along a hairline SVG
+   path, used as quiet background atmosphere (hero backdrop, divider). */
+@keyframes trace-flow {
+  to {
+    stroke-dashoffset: -240;
+  }
+}
+
+.ambient-trace-path {
+  animation: trace-flow 14s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-trace-path {
     animation: none;
   }
 }

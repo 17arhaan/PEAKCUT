@@ -5,6 +5,6 @@ test("landing page shows pricing and CTA", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Pricing" })).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Start free — 60 minutes" }),
+    page.getByRole("button", { name: "Start free — 60 minutes" }),
   ).toBeVisible();
 });

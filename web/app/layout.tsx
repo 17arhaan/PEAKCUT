@@ -34,7 +34,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Shorts Factory",
+  title: "Peakcut",
   description: "Long video in. Viral clips out — with receipts.",
 };
 
