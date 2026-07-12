@@ -51,6 +51,16 @@ describe("GET /api/jobs/[jobId]/status", () => {
         r2Key: `u/${ownerId}/${jobId}/clip_1.mp4`,
         thumbKey: `u/${ownerId}/${jobId}/clip_1_thumb.jpg`,
         status: "ready",
+        evidence: {
+          score: {
+            total: 88,
+            verdict: "keep",
+            components: { hook_strength: { score: 22, evidence: [{ kind: "laughter", t: 3, value: null }] } },
+          },
+          candidate: { t0: 0, t1: 5, source: "llm", notes: "", evidence: [] },
+          repairs: [],
+        },
+        qa: { passed: true, failures: [] },
       },
       {
         jobId,
@@ -104,10 +114,15 @@ describe("GET /api/jobs/[jobId]/status", () => {
     expect(ready).toMatchObject({ index: 1, status: "ready", score: 88, hook: "A great hook" });
     expect(ready.mp4_url).toBe(`/api/media/u/${ownerId}/${jobId}/clip_1.mp4`);
     expect(ready.thumb_url).toBe(`/api/media/u/${ownerId}/${jobId}/clip_1_thumb.jpg`);
+    expect(ready.evidence).toMatchObject({ score: { total: 88, verdict: "keep" } });
+    expect(ready.qa).toEqual({ passed: true, failures: [] });
 
     expect(dropped).toMatchObject({ index: 2, status: "dropped", dropped_reason: "BLACK" });
     expect(dropped.mp4_url).toBeNull();
     expect(dropped.thumb_url).toBeNull();
+    // no evidence/qa seeded for this clip -- the route must null-coalesce, not crash on the missing jsonb.
+    expect(dropped.evidence).toBeNull();
+    expect(dropped.qa).toBeNull();
 
     expect(body.events).toHaveLength(1);
     expect(body.events[0]).toMatchObject({ agent: "scout", action: "found" });

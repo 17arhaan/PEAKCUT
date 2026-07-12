@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { JobStatusBadge } from "@/components/job-status-badge";
+import { ClipEvidence } from "@/app/jobs/[jobId]/ClipEvidence";
 import { humanizeEvent, humanizeStage } from "@/lib/job-events";
 import type { JobStatus, JobStatusClip } from "@/lib/job-status";
 
@@ -135,10 +136,7 @@ function ClipCard({ clip }: { clip: JobStatusClip }) {
         </div>
       </CardHeader>
       <CardContent className="flex items-center justify-between gap-2">
-        {/* Evidence panel is W10 -- placeholder only, no dialog yet. */}
-        <Button size="sm" variant="ghost" disabled>
-          Why this clip →
-        </Button>
+        <ClipEvidence clip={clip} />
         {clip.mp4_url ? (
           <Button size="sm" render={<a href={clip.mp4_url} download />}>
             Download

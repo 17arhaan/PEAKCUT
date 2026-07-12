@@ -2,6 +2,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentEvents, clips, jobs } from "@/lib/db/schema";
 import { storage } from "@/lib/storage";
+import type { ClipEvidence, Qa } from "@/lib/format-evidence";
 
 const EVENT_LIMIT = 20;
 
@@ -13,6 +14,12 @@ export interface JobStatusClip {
   dropped_reason: string | null;
   mp4_url: string | null;
   thumb_url: string | null;
+  // The "why this clip" audit trail (W10) — verbatim from clips.evidence/qa
+  // jsonb (W7 wrote it straight from run.json, see lib/run-import.ts). Not
+  // sensitive like the media URLs above: it's derived scoring/QA data, safe
+  // to ship to the owning client as-is.
+  evidence: ClipEvidence | null;
+  qa: Qa | null;
 }
 
 export interface JobStatusEvent {
@@ -68,6 +75,11 @@ export async function getJobStatusForOwner(jobId: string, userId: string): Promi
       dropped_reason: clip.droppedReason,
       mp4_url: clip.status === "ready" && clip.r2Key ? storage.getUrl(clip.r2Key) : null,
       thumb_url: clip.status === "ready" && clip.thumbKey ? storage.getUrl(clip.thumbKey) : null,
+      // jsonb columns come back untyped from drizzle -- cast, don't
+      // re-validate: W7's clipRow() already wrote these through
+      // RunJsonSchema on the way in, so the shape is trusted here.
+      evidence: (clip.evidence as ClipEvidence | null) ?? null,
+      qa: (clip.qa as Qa | null) ?? null,
     })),
     // newest last, per the wire contract — reverse the DESC/LIMIT query.
     events: eventRows
