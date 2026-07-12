@@ -40,7 +40,6 @@ const COMPONENT_ORDER = ["hook_strength", "payoff", "emotion", "quotability"];
  */
 export function ClipEvidence({ clip }: { clip: JobStatusClip }) {
   const { evidence, qa } = clip;
-  const dropped = clip.status === "dropped";
 
   return (
     <Dialog>
@@ -55,17 +54,9 @@ export function ClipEvidence({ clip }: { clip: JobStatusClip }) {
           <p className="text-sm text-muted-foreground">No evidence recorded for this clip.</p>
         ) : (
           <div className="flex flex-col gap-5">
-            {dropped ? (
-              <div className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                Dropped: {clip.dropped_reason ? humanizeQaCode(clip.dropped_reason) : "No reason recorded."}
-              </div>
-            ) : (
-              <ScoreHeader score={evidence.score} />
-            )}
+            <ScoreHeader score={evidence.score} />
 
-            {/* A dropped clip shows its outcome above, not a score breakdown --
-                and a clip dropped pre-scoring carries score: null anyway. */}
-            {!dropped && evidence.score ? <ComponentBreakdown components={evidence.score.components} /> : null}
+            {evidence.score ? <ComponentBreakdown components={evidence.score.components} /> : null}
 
             <CandidateSection candidate={evidence.candidate} />
 
