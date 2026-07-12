@@ -44,6 +44,11 @@ const envSchema = z.object({
   // Merchant-of-record billing (Dodo Payments preferred, Paddle fallback).
   DODO_API_KEY: optionalGated("DODO_API_KEY", "billing checkout"),
   DODO_WEBHOOK_SECRET: optionalGated("DODO_WEBHOOK_SECRET", "billing webhook signature verification"),
+
+  // Provider-agnostic webhook HMAC secret (W13). Dodo/Paddle map into this
+  // normalized event shape at swap-in 19; until then the route verifies
+  // self-signed test payloads against this secret directly.
+  BILLING_WEBHOOK_SECRET: optionalGated("BILLING_WEBHOOK_SECRET", "billing webhook signature verification"),
 });
 
 export type Env = z.infer<typeof envSchema>;

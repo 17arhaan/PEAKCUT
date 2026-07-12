@@ -22,6 +22,7 @@ const SIGNUP_GRANT_REASON = "signup_grant";
 const JOB_DEBIT_REASON = "job_debit";
 const JOB_REFUND_REASON = "job_refund";
 const JOB_RECONCILE_REASON = "job_reconcile";
+const PURCHASE_REASON = "purchase";
 
 export class InsufficientCreditsError extends Error {
   constructor(
@@ -51,6 +52,39 @@ export async function grantSignup(userId: string, tx: Db = db): Promise<void> {
     await tx
       .update(users)
       .set({ minutesBalance: sql`${users.minutesBalance} + ${SIGNUP_GRANT_MINUTES}` })
+      .where(eq(users.id, userId));
+  }
+}
+
+/**
+ * Credits `minutes` to userId's balance for a billing event (webhook
+ * top-up or subscription renewal). Idempotent on (reason, ref=event_id) --
+ * same pattern as grantSignup: ledger insert is the idempotency gate,
+ * balance only bumps if that insert actually landed a new row. A duplicate
+ * webhook delivery for the same event_id is a no-op here -- this is the
+ * money-safety core the billing webhook route depends on. Takes an
+ * optional `tx` so the webhook route can run the payments-row insert and
+ * this ledger bump in the same transaction (both commit or roll back
+ * together).
+ */
+export async function topUp(
+  userId: string,
+  minutes: number,
+  ref: string,
+  reason: string = PURCHASE_REASON,
+  tx: Db = db,
+): Promise<void> {
+  const m = Math.round(minutes);
+  const [ledgerRow] = await tx
+    .insert(creditLedger)
+    .values({ userId, deltaMinutes: m, reason, ref })
+    .onConflictDoNothing({ target: [creditLedger.reason, creditLedger.ref] })
+    .returning();
+
+  if (ledgerRow) {
+    await tx
+      .update(users)
+      .set({ minutesBalance: sql`${users.minutesBalance} + ${m}` })
       .where(eq(users.id, userId));
   }
 }

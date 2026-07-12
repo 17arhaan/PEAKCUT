@@ -220,7 +220,7 @@ describe("deleteAccount", () => {
     expect(row).toBeUndefined();
   });
 
-  it("propagates a storage.delete failure without silently succeeding", async () => {
+  it("propagates a storage.delete failure without silently succeeding, but still signs out (W12 hardening)", async () => {
     const { userId, jobId } = await seedUserWithData("storage-fail");
     mockAuth.mockResolvedValue({ user: { id: userId } } as never);
     mockStorageDelete.mockRejectedValueOnce(new Error("disk error"));
@@ -231,6 +231,11 @@ describe("deleteAccount", () => {
     // user row purge isn't rolled back by a later storage failure.
     const [row] = await db.select().from(users).where(eq(users.id, userId));
     expect(row).toBeUndefined();
+
+    // A deleted user must never keep a valid session cookie just because
+    // storage cleanup failed -- signOut runs regardless.
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+    expect(mockSignOut).toHaveBeenCalledWith({ redirectTo: "/" });
     void jobId;
   });
 });

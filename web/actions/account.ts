@@ -40,6 +40,12 @@ const WORK_ROOT = path.join(process.cwd(), ".data", "work");
  * cleaned up best-effort after everything else succeeds -- a missing dir
  * (job never reached the render stage, or was already cleaned up) must
  * not fail the account deletion.
+ *
+ * signOut always runs, even if storage.delete throws (W12 hardening): the
+ * DB row is already gone by that point, so a deleted user must never keep
+ * a valid session cookie just because a storage backend hiccupped. The
+ * storage error still propagates to the caller (via `finally`) -- it's not
+ * swallowed, just no longer allowed to block sign-out.
  */
 export async function deleteAccount(): Promise<void> {
   const session = await auth();
@@ -58,15 +64,19 @@ export async function deleteAccount(): Promise<void> {
     return rows;
   });
 
-  await storage.delete(`u/${userId}`);
+  try {
+    await storage.delete(`u/${userId}`);
 
-  await Promise.all(
-    userJobs.map((job) =>
-      rm(path.join(WORK_ROOT, job.id), { recursive: true, force: true }).catch((err) => {
-        console.error(`[deleteAccount] work dir cleanup failed for job ${job.id}:`, err);
-      }),
-    ),
-  );
-
-  await signOut({ redirectTo: "/" });
+    await Promise.all(
+      userJobs.map((job) =>
+        rm(path.join(WORK_ROOT, job.id), { recursive: true, force: true }).catch((err) => {
+          console.error(`[deleteAccount] work dir cleanup failed for job ${job.id}:`, err);
+        }),
+      ),
+    );
+  } finally {
+    // Runs even if storage.delete threw above -- the users row is already
+    // deleted, so the session must not outlive it.
+    await signOut({ redirectTo: "/" });
+  }
 }

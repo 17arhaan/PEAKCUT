@@ -8,6 +8,7 @@ process.env.DATABASE_URL ??=
   "postgresql://postgres:postgres@localhost:5432/shorts_factory_test";
 process.env.AUTH_SECRET ??= "test-secret";
 process.env.AUTH_DEV ??= "1";
+process.env.BILLING_WEBHOOK_SECRET ??= "test-billing-secret";
 
 // Ensure test DB exists and schema is deployed (fallback for existing containers).
 // ponytail: one-shot create-and-push; idempotent so safe to run per test suite

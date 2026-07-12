@@ -10,6 +10,7 @@ import {
   ledgerSum,
   reconcile,
   refund,
+  topUp,
 } from "@/lib/credits";
 
 const createdUserIds: string[] = [];
@@ -45,6 +46,41 @@ describe("grantSignup", () => {
 
     expect(await balance(userId)).toBe(60);
     expect(await ledgerRowsFor(userId, "signup_grant")).toHaveLength(1);
+  });
+});
+
+describe("topUp", () => {
+  it("credits minutes and records a purchase ledger row", async () => {
+    const userId = await createUser(0);
+    const ref = crypto.randomUUID();
+
+    await topUp(userId, 120, ref);
+
+    expect(await balance(userId)).toBe(120);
+    const rows = await ledgerRowsFor(userId, "purchase");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ref, deltaMinutes: 120 });
+  });
+
+  it("is idempotent: the same ref applied twice bumps the balance only once", async () => {
+    const userId = await createUser(0);
+    const ref = crypto.randomUUID();
+
+    await topUp(userId, 90, ref);
+    await topUp(userId, 90, ref);
+
+    expect(await balance(userId)).toBe(90);
+    expect(await ledgerRowsFor(userId, "purchase")).toHaveLength(1);
+  });
+
+  it("accepts a custom reason (e.g. subscription renewal)", async () => {
+    const userId = await createUser(0);
+    const ref = crypto.randomUUID();
+
+    await topUp(userId, 300, ref, "subscription_renewal");
+
+    expect(await balance(userId)).toBe(300);
+    expect(await ledgerRowsFor(userId, "subscription_renewal")).toHaveLength(1);
   });
 });
 
