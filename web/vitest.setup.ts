@@ -9,6 +9,7 @@ process.env.DATABASE_URL ??=
 process.env.AUTH_SECRET ??= "test-secret";
 process.env.AUTH_DEV ??= "1";
 process.env.BILLING_WEBHOOK_SECRET ??= "test-billing-secret";
+process.env.CRON_SECRET ??= "test-cron-secret";
 
 // Ensure test DB exists and schema is deployed (fallback for existing containers).
 // ponytail: one-shot create-and-push; idempotent so safe to run per test suite

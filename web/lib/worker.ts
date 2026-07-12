@@ -1,5 +1,5 @@
 import { closeSync, openSync } from "node:fs";
-import { mkdir, open, readFile, stat } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
@@ -276,28 +276,84 @@ export class LocalWorker implements Worker {
   }
 }
 
+// TEST-ONLY fixture paths for StubWorker.start (below). process.cwd() is
+// web/ (see REPO_ROOT's comment above), matching lib/run-import.test.ts's
+// own FIXTURE_PATH.
+const FIXTURE_RUN_PATH = path.join(process.cwd(), "test/fixtures/run.fixture.json");
+const FIXTURE_AGENT_EVENTS_PATH = path.join(process.cwd(), "test/fixtures/agent_events.fixture.jsonl");
+
+// ponytail: fixed delay before the stub kicks off its fixture import --
+// long enough that e2e specs asserting the immediate post-create
+// "processing" state (new-job.spec.ts) aren't racing a near-instant import,
+// short enough that happy-path.spec.ts isn't stuck waiting. Bump if that
+// race ever flakes on a slower CI runner.
+const STUB_IMPORT_DELAY_MS = 1500;
+
+/**
+ * TEST-ONLY: copies the committed run.fixture.json (+ agent_events fixture)
+ * into a job's outDir, rewriting each clip's paths.mp4/thumb -- the real
+ * fixture's are absolute paths from the machine that produced it (see
+ * lib/run-import.test.ts) -- to small real files under outDir, so
+ * importRun's storage-copy step has something to actually copy. Then runs
+ * the REAL importer against it, same as LocalWorker's child.on("exit")
+ * handler. This is what lets e2e (STUB_WORKER=1) exercise the real
+ * run.json -> jobs/clips import path without spawning whisper/ffmpeg.
+ * Never called outside STUB_WORKER=1.
+ */
+async function runStubFixture(jobId: string, outDir: string): Promise<void> {
+  await sleep(STUB_IMPORT_DELAY_MS);
+  await mkdir(outDir, { recursive: true });
+
+  const raw = await readFile(FIXTURE_RUN_PATH, "utf8");
+  const run = JSON.parse(raw) as {
+    clips: { index: number; paths: { mp4: string | null; thumb: string | null } }[];
+  };
+
+  for (const clip of run.clips) {
+    const mp4Path = path.join(outDir, `src_clip_${clip.index}.mp4`);
+    const thumbPath = path.join(outDir, `src_clip_${clip.index}_thumb.jpg`);
+    await writeFile(mp4Path, `stub-mp4-${clip.index}`);
+    await writeFile(thumbPath, `stub-thumb-${clip.index}`);
+    clip.paths.mp4 = mp4Path;
+    clip.paths.thumb = thumbPath;
+  }
+
+  await writeFile(path.join(outDir, "run.json"), JSON.stringify(run));
+  await copyFile(FIXTURE_AGENT_EVENTS_PATH, path.join(outDir, "agent_events.jsonl"));
+
+  await importRun(jobId, outDir);
+}
+
 // ponytail: ModalWorker lands with the Modal token (lib/env.ts's
 // MODAL_TOKEN_ID/MODAL_TOKEN_SECRET).
 //
-// STUB_WORKER=1 swaps in a no-op worker that only does the DB status flip —
-// no subprocess. Set it for any process that must not spawn the real
-// uv+whisper pipeline (playwright's dev server via playwright.config.ts's
-// webServer.env). Unit tests instead mock this module's `worker` export
-// directly (vi.mock("@/lib/worker", ...)) so createJob's own tests don't
-// depend on this env var.
+// STUB_WORKER=1 swaps in a worker that never spawns the real uv+whisper
+// subprocess. start() flips the job to processing/ingest synchronously
+// (same immediate observable state as LocalWorker.start), then
+// fire-and-forgets runStubFixture (above) so e2e specs can poll a job
+// through to a REAL 'done' state -- real clips, scores, hooks, evidence --
+// via the real importer running against fixture data, fast. Set STUB_WORKER
+// for any process that must not spawn the real pipeline (playwright's dev
+// server via playwright.config.ts's webServer.env). Unit tests instead mock
+// this module's `worker` export directly (vi.mock("@/lib/worker", ...)) so
+// createJob's own tests don't depend on this env var.
 class StubWorker implements Worker {
   async start(job: { id: string; source: string; outDir: string }): Promise<void> {
     await db
       .update(jobs)
       .set({ status: "processing", stage: "ingest", progress: 0, updatedAt: new Date() })
       .where(eq(jobs.id, job.id));
+
+    void runStubFixture(job.id, job.outDir).catch((err) => {
+      console.error(`[job ${job.id}] stub fixture import error:`, err);
+    });
   }
 
   // No-op: reRenderStyle (actions/jobs.ts) already flips the job to
   // 'processing' before calling this, and StubWorker never produces a
-  // run-<style>.json -- under STUB_WORKER the job simply stays
-  // 'processing', same as start() leaves a job at 'processing'/'ingest'
-  // rather than simulating a full run through to 'done'.
+  // run-<style>.json -- under STUB_WORKER a restyle simply stays
+  // 'processing' forever (e2e/caption-style.spec.ts only asserts the
+  // optimistic in-flight state, never a completed restyle).
   async renderStyle(): Promise<void> {}
 }
 

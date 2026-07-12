@@ -49,6 +49,13 @@ const envSchema = z.object({
   // normalized event shape at swap-in 19; until then the route verifies
   // self-signed test payloads against this secret directly.
   BILLING_WEBHOOK_SECRET: optionalGated("BILLING_WEBHOOK_SECRET", "billing webhook signature verification"),
+
+  // Stuck-job sweeper cron route auth (W14): app/api/cron/sweep requires a
+  // `Bearer <CRON_SECRET>` Authorization header. Same fail-closed pattern as
+  // BILLING_WEBHOOK_SECRET -- an unset secret means the route 401s for
+  // everyone (including a real cron trigger) rather than accepting
+  // unauthenticated sweeps.
+  CRON_SECRET: optionalGated("CRON_SECRET", "cron sweeper route auth"),
 });
 
 export type Env = z.infer<typeof envSchema>;
