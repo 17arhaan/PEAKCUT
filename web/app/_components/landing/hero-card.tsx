@@ -130,27 +130,24 @@ function EvidenceRow({
 function AnimatedCard({ reduceMotion }: { reduceMotion: boolean }) {
   return (
     <motion.div
-      className="signal-glow relative mx-auto w-full max-w-[320px] rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4"
+      className="signal-glow relative mx-auto w-full max-w-[320px] rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-5"
       initial={reduceMotion ? undefined : { opacity: 0, scale: 0.96, y: 8 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.5, ease: [0.16, 1, 0.3, 1] as const }}
     >
-      <div className="flex gap-3">
-        {/* timestamp ticks along the left edge — the signal motif */}
-        <div
-          aria-hidden
-          className="flex w-8 shrink-0 flex-col justify-between py-1 font-mono-data text-[9px] text-[var(--muted)]"
-        >
-          {["00:00", "00:15", "00:30", "00:45"].map((t) => (
-            <div key={t} className="flex items-center gap-1">
-              <span className="h-px w-2 bg-[var(--line)]" />
-              {t}
-            </div>
-          ))}
-        </div>
-
-        {/* mock vertical clip thumbnail */}
-        <div className="relative aspect-9/16 flex-1 overflow-hidden rounded-lg border border-[var(--line)] bg-gradient-to-b from-[var(--pulse)]/30 via-[var(--panel)] to-[var(--ink)]">
+      <div className="flex justify-center">
+        {/* mock vertical clip thumbnail — centered so the preview sits
+            symmetrically in the card, not shoved against the right border */}
+        <div className="relative aspect-9/16 w-full max-w-[248px] overflow-hidden rounded-lg border border-[var(--line)] bg-gradient-to-b from-[var(--pulse)]/30 via-[var(--panel)] to-[var(--ink)]">
+          {/* timeline ticks overlaid on the left edge — the signal motif */}
+          <div
+            aria-hidden
+            className="absolute inset-y-3 left-2 z-10 flex flex-col justify-between"
+          >
+            {[0, 1, 2, 3].map((i) => (
+              <span key={i} className="h-px w-2 bg-white/25" />
+            ))}
+          </div>
           {/* directional light suggesting a backlit subject, not an empty box */}
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_28%_22%,rgba(245,179,1,0.22),transparent_42%),radial-gradient(circle_at_65%_55%,rgba(124,92,255,0.3),transparent_55%)]" />
           {/* edge vignette for depth */}
@@ -177,11 +174,15 @@ function AnimatedCard({ reduceMotion }: { reduceMotion: boolean }) {
 
           <ScoreBadge reduceMotion={reduceMotion} />
 
+          {/* karaoke caption in the lower third — where captions sit on a real
+              vertical clip; the highlighted word shows the product's styling */}
+          <p className="absolute inset-x-0 bottom-[24%] px-3 text-center text-[13px] leading-snug font-extrabold tracking-tight text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+            you won&rsquo;t <span className="text-[var(--signal)]">believe</span> what happened next
+          </p>
+
+          {/* audio energy pinned to the bottom edge */}
           <div className="absolute inset-x-0 bottom-0">
             <Waveform reduceMotion={reduceMotion} />
-            <p className="mx-2 mb-2 line-clamp-2 rounded bg-black/40 px-1.5 py-1 text-[11px] leading-tight font-semibold text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
-              &ldquo;...you won&rsquo;t believe what happened next&rdquo;
-            </p>
           </div>
         </div>
       </div>

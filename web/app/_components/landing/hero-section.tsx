@@ -60,8 +60,10 @@ export function HeroSection() {
   return (
     <section
       onPointerMove={spotlight.onPointerMove}
-      className="relative mx-auto grid w-full max-w-6xl gap-12 overflow-hidden px-6 py-20 md:grid-cols-2 md:items-center md:py-28"
+      className="relative w-full overflow-hidden"
     >
+      {/* full-bleed background effects — span the whole viewport so the glow
+          isn't letterboxed/cut at the sides */}
       <Aurora />
       {spotlight.enabled && (
         <motion.div
@@ -71,6 +73,8 @@ export function HeroSection() {
         />
       )}
 
+      {/* content stays in the centered column */}
+      <div className="mx-auto grid w-full max-w-6xl gap-12 px-6 py-20 md:grid-cols-2 md:items-center md:py-28">
       <motion.div
         className="flex flex-col items-start gap-5 text-left"
         initial={reduceMotion ? undefined : "hidden"}
@@ -133,6 +137,7 @@ export function HeroSection() {
       </motion.div>
 
       <ClipReceiptCard />
+      </div>
     </section>
   );
 }
