@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { Button } from "@/components/ui/button";
 
-// Guarded-page header (email + sign out). jobs/settings arrive in later
-// tasks and can adopt this same shape then — not scaffolding it early.
+// Guarded-page header (email + settings + sign out). jobs arrives in a
+// later task and can adopt this same shape then — not scaffolding it early.
 export default async function DashboardLayout({
   children,
 }: {
@@ -16,6 +17,9 @@ export default async function DashboardLayout({
         <span className="text-sm font-semibold tracking-tight">Shorts Factory</span>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">{session?.user?.email}</span>
+          <Button size="sm" variant="ghost" render={<Link href="/settings" />}>
+            Settings
+          </Button>
           <form
             action={async () => {
               "use server";

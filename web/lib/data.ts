@@ -18,3 +18,9 @@ export async function getUserBalance(userId: string): Promise<number> {
     .where(eq(users.id, userId));
   return row?.minutesBalance ?? 0;
 }
+
+/** Full profile row for /settings -- email, plan, balance, member-since. */
+export async function getUserProfile(userId: string) {
+  const [row] = await db.select().from(users).where(eq(users.id, userId));
+  return row ?? null;
+}
