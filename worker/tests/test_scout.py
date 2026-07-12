@@ -82,8 +82,9 @@ def test_laughter_with_enough_leadup_speech_yields_candidate():
     assert len(candidates) == 1
     c = candidates[0]
     assert [cl.kind for cl in c.evidence] == ["laughter"]
-    assert c.t1 <= 52.0 + 3.0 + 1e-9
-    assert c.t0 <= 50.0
+    assert c.t0 <= 50.0  # opens on the lead-up before the laugh
+    assert c.t1 >= 52.0  # includes the laugh itself
+    assert c.t1 - c.t0 >= 30.0 - 1e-9  # padded out to the 30s floor
 
 
 def test_laughter_without_enough_leadup_speech_yields_nothing():
@@ -177,7 +178,8 @@ def test_cap_at_20_candidates():
 
 
 def test_window_clamped_to_media_duration():
-    """A peak near the very start clamps its -20s edge to 0."""
+    """A peak near the very start clamps its -20s edge to 0; the remaining
+    window is then padded toward the 30s floor (bounded by the 0 edge)."""
     idx = _mk_index(
         media=MediaInfo(duration_s=60.0, fps=30.0, width=1920, height=1080),
         peaks=[Peak(t=2.0, sigma=2.5)],
@@ -186,7 +188,7 @@ def test_window_clamped_to_media_duration():
     candidates = heuristic_candidates(idx)
     assert len(candidates) == 1
     assert candidates[0].t0 == 0.0
-    assert candidates[0].t1 == 22.0
+    assert candidates[0].t1 == 26.0
 
 
 def test_long_scene_span_is_split_not_dropped():

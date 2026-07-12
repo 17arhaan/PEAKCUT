@@ -53,7 +53,7 @@ from shorts.types import (
     SourceMedia,
 )
 
-MAX_CLIPS = 4
+MAX_CLIPS = 8
 # ponytail: style selection (picking s1/s2/s3 per clip) is a later task --
 # one fixed caption preset for every clip's FIRST render; render_style()
 # below is how a different style gets applied after the fact.

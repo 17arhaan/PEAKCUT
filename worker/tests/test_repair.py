@@ -82,57 +82,59 @@ def test_repair_word_clip_fixes_a_straddled_start_boundary(tmp_path):
     """A word straddles cut.t0 -- one repair() call must re-snap t0 back to
     that word's own start so it's no longer clipped."""
     idx = _mk_index(words=[Word(text="hello", t0=4.5, t1=5.5, conf=0.9)])
-    cut = Cut(t0=5.0, t1=13.0)
+    # cut already >=30s so the min-duration clamp is a no-op and only the
+    # boundary snap moves t0 -- isolates what this test is about.
+    cut = Cut(t0=5.0, t1=40.0)
     failures = [QAFail(code="WORD_CLIP", detail="forced", route_to="surgeon")]
 
     fixed = repair(cut, idx, failures, _log(tmp_path))
 
     assert qa._check_word_clip(fixed, idx) is None
     assert fixed.t0 == pytest.approx(4.5)
-    assert fixed.t1 == pytest.approx(13.0)  # untouched boundary left alone
+    assert fixed.t1 == pytest.approx(40.0)  # untouched boundary left alone
 
 
 def test_repair_word_clip_fixes_a_straddled_end_boundary(tmp_path):
-    idx = _mk_index(words=[Word(text="bye", t0=12.5, t1=13.5, conf=0.9)])
-    cut = Cut(t0=5.0, t1=13.0)
+    idx = _mk_index(words=[Word(text="bye", t0=34.5, t1=35.5, conf=0.9)])
+    cut = Cut(t0=5.0, t1=35.0)  # >=30s so the snap, not the clamp, sets t1
     failures = [QAFail(code="WORD_CLIP", detail="forced", route_to="surgeon")]
 
     fixed = repair(cut, idx, failures, _log(tmp_path))
 
     assert qa._check_word_clip(fixed, idx) is None
     assert fixed.t0 == pytest.approx(5.0)  # untouched boundary left alone
-    # _snap_t1 adds up to 0.8s trailing room past the word's own end (13.5),
-    # capped only by the media duration bound (60.0s here) -- 14.3, not 13.5.
-    assert fixed.t1 == pytest.approx(14.3)
+    # _snap_t1 adds up to 0.8s trailing room past the word's own end (35.5),
+    # capped only by the media duration bound (60.0s here) -- 36.3, not 35.5.
+    assert fixed.t1 == pytest.approx(36.3)
 
 
 # --- surgeon.repair(): ALIGN ----------------------------------------------
 
 
 def test_repair_align_trims_to_the_longest_well_aligned_run(tmp_path):
-    """20 one-second words: the first 7 (0-7s) are well-aligned, the
-    remaining 13 (7-20s) are not. p95 excludes only the single highest
-    value in any sample of >=2 (floor(0.95*(n-1)) < n-1 whenever n>=2), so
-    a run with exactly ONE bad word mixed in still passes p95<=300 -- the
-    actual longest passing run is the 7 good words PLUS the first bad one
-    (8 words, [0, 8)); a 9th word (2 bad values) tips p95 over. This
-    exercises the same p95 formula qa._check_align uses, so the expected
-    boundary is derived from that formula, not eyeballed."""
-    words = [Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=50.0) for i in range(7)]
+    """45 one-second words: the first 32 (0-32s) are well-aligned, the rest
+    are not. repair() must trim the cut down to the well-aligned span --
+    which clears the 30s duration floor, so the trim is allowed -- and the
+    trimmed cut must pass _check_align while the original (all 45 words)
+    genuinely fails. The exact boundary depends on qa._check_align's p95
+    formula, so this asserts the real behavior (trimmed, >=30s, well-aligned)
+    rather than a hand-computed frame."""
+    words = [Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=50.0) for i in range(32)]
     words += [
         Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=500.0)
-        for i in range(7, 20)
+        for i in range(32, 45)
     ]
     idx = _mk_index(language="en", words=words)
-    cut = Cut(t0=0.0, t1=20.0)
+    cut = Cut(t0=0.0, t1=45.0)
     failures = [QAFail(code="ALIGN", detail="forced", route_to="surgeon")]
 
     fixed = repair(cut, idx, failures, _log(tmp_path))
 
     assert fixed.t0 == pytest.approx(0.0)
-    assert fixed.t1 == pytest.approx(8.0)
-    assert qa._check_align(fixed, idx) is None
-    # and the ORIGINAL cut (all 20 words) genuinely still fails -- the trim
+    assert fixed.t1 < cut.t1  # genuinely trimmed
+    assert fixed.t1 - fixed.t0 >= 30.0  # still clears the duration floor
+    assert qa._check_align(fixed, idx) is None  # trimmed span is well-aligned
+    # and the ORIGINAL cut (all 45 words) genuinely still fails -- the trim
     # is doing real work, not a no-op.
     assert qa._check_align(cut, idx) is not None
 
@@ -143,10 +145,10 @@ def test_repair_align_returns_cut_unchanged_when_no_run_is_well_aligned(tmp_path
     (the pipeline's repair loop then exhausts its budget and drops)."""
     words = [
         Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=500.0)
-        for i in range(10)
+        for i in range(40)
     ]
     idx = _mk_index(language="en", words=words)
-    cut = Cut(t0=0.0, t1=10.0)
+    cut = Cut(t0=0.0, t1=40.0)  # already >=30s so the clamp can't change it
     failures = [QAFail(code="ALIGN", detail="forced", route_to="surgeon")]
 
     fixed = repair(cut, idx, failures, _log(tmp_path))
@@ -156,15 +158,15 @@ def test_repair_align_returns_cut_unchanged_when_no_run_is_well_aligned(tmp_path
 
 
 def test_repair_align_returns_cut_unchanged_when_the_only_good_run_is_too_short(tmp_path):
-    """A 3s well-aligned run exists but falls short of the 5s floor -- must
-    not be used, cut stays unchanged."""
-    words = [Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=50.0) for i in range(3)]
+    """An ~11s well-aligned run exists but falls short of the 30s duration
+    floor -- it must not be used, so the cut stays unchanged."""
+    words = [Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=50.0) for i in range(10)]
     words += [
         Word(text="w", t0=float(i), t1=float(i) + 1.0, conf=0.9, align_err_ms=500.0)
-        for i in range(3, 10)
+        for i in range(10, 40)
     ]
     idx = _mk_index(language="en", words=words)
-    cut = Cut(t0=0.0, t1=10.0)
+    cut = Cut(t0=0.0, t1=40.0)  # already >=30s so the clamp can't change it
     failures = [QAFail(code="ALIGN", detail="forced", route_to="surgeon")]
 
     fixed = repair(cut, idx, failures, _log(tmp_path))
@@ -269,11 +271,12 @@ def test_talking_head_black_from_source_content_cannot_be_repaired_and_drops(tmp
     27.63-28.09s) that any cut covering it will reproduce on every
     re-render; the repair loop must exhaust its 2-attempt budget and drop
     that clip with BLACK in dropped_reason, not loop forever or silently
-    ship a defective clip."""
+    ship a defective clip. (With the 30s clip floor one or more kept cuts can
+    straddle that span; every one of them must drop the same way.)"""
     results = run(fixture("real_talking_head.mp4"), tmp_path)
 
     black_dropped = [r for r in results if r.dropped_reason and "BLACK" in r.dropped_reason]
-    assert len(black_dropped) == 1
+    assert len(black_dropped) >= 1
 
     run_json = json.loads((tmp_path / "run.json").read_text())
     entry = next(

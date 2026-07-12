@@ -1,12 +1,12 @@
-"""Cut/crop/burn/loudnorm/thumbnail a single clip.
+"""Cut/reframe/burn/loudnorm/thumbnail a single clip.
 
-Crop fallback chain (critic directive 9): a dominant face in the clip's
-opening scene-span gets a static face-centered crop; no dominant face falls
-back to a plain center crop; source video already <=9:16 (portrait-or-
-narrower) skips cropping entirely in favor of scale+pad (pillarbox/
-letterbox). Audio is loudness-normalized to -14 LUFS via two-pass loudnorm.
-A single frame at cut.t0 (post-crop, no captions) is exported as a
-1080x1920 jpg thumbnail.
+Reframe to 1080x1920 uses a blurred-background "fit": the source is scaled to
+fit whole (nothing cropped) and centered, and a blurred, zoomed-to-fill copy
+of the same frame fills the top/bottom (or side) margins -- the standard
+vertical-clip look that keeps every important visual on screen instead of
+cropping the sides off a 16:9 frame. Audio is loudness-normalized to -14 LUFS
+via two-pass loudnorm. A single frame at cut.t0 (post-reframe, no captions)
+is exported as a 1080x1920 jpg thumbnail.
 """
 
 import contextlib
@@ -19,7 +19,6 @@ from pathlib import Path
 
 from shorts.ffmpeg import FfmpegError, run
 from shorts.render.captions import words_to_ass
-from shorts.signals.index import scene_span
 from shorts.types import Cut, Hook, SignalIndex
 
 # worker/src/shorts/render/renderer.py -> parents[3] == worker/
@@ -43,48 +42,22 @@ def _cwd(path: Path):
         os.chdir(prev)
 
 
-def _crop_geometry(
-    src_w: int, src_h: int, face_cx: float | None
-) -> tuple[int, int, int, int] | None:
-    """Pure function (no ffmpeg/IO): the 9:16 crop window in source-pixel
-    space, or None if the source is already <=9:16 (portrait-or-narrower)
-    and should be scaled+padded instead of cropped.
-
-    `face_cx` is the normalized (0..1) mean dominant-face x-center for the
-    clip, or None to fall back to a plain center crop (no dominant face
-    found -- e.g. screenshare, or a real face that never clears the
-    detector's confidence gate). Returns (crop_w, crop_h, x, y).
-    """
-    if src_w * 16 <= src_h * 9:
-        return None
-
-    crop_w = (src_h * 9) // 16
-    crop_h = src_h
-    if face_cx is None:
-        x = (src_w - crop_w) // 2
-    else:
-        x = round(face_cx * src_w - crop_w / 2)
-        x = max(0, min(x, src_w - crop_w))
-    return crop_w, crop_h, x, 0
-
-
-def _scene_face_center_x(idx: SignalIndex, cut: Cut) -> float | None:
-    """Mean normalized x-center of the dominant face box, sampled across
-    the clip's *opening* scene-span (scene_span at cut.t0, clamped to the
-    cut) -- a static per-shot crop, not frame-by-frame tracking.
-    # ponytail: if a cut straddles a mid-clip scene change the crop stays
-    anchored to the first scene; smooth/multi-shot tracking is v2.
-    None if no dominant face was found in that span."""
-    scene = scene_span(idx, cut.t0)
-    t0 = max(cut.t0, scene.t0) if scene else cut.t0
-    t1 = min(cut.t1, scene.t1) if scene else cut.t1
-
-    centers = [
-        f.boxes[f.dominant].x + f.boxes[f.dominant].w / 2
-        for f in idx.faces
-        if t0 <= f.t < t1 and f.dominant is not None
-    ]
-    return sum(centers) / len(centers) if centers else None
+def _reframe_fc() -> str:
+    """The blurred-background "fit" filtergraph: consumes [0:v] and ends on an
+    *unlabeled* reframed 1080x1920 stream, so a caller can either chain more
+    filters (subtitles) or just append an output label. `split` feeds the same
+    frame to two branches -- [bg] is scaled to *fill* (increase + crop) then
+    blurred to cover the whole target, [fg] is scaled to *fit* whole (decrease,
+    nothing cropped) and overlaid centered on top. Aspect-agnostic: a 16:9
+    source gets top/bottom margins, a tall source gets side margins, both
+    blurred-filled."""
+    return (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,"
+        f"crop={TARGET_W}:{TARGET_H},gblur=sigma=24[bgb];"
+        f"[fg]scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease[fgs];"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2"
+    )
 
 
 def _measure_loudness(video: Path, cut: Cut) -> dict:
@@ -158,29 +131,23 @@ def render_clip(
         )
     )
 
-    face_cx = _scene_face_center_x(idx, cut)
-    geom = _crop_geometry(idx.media.width, idx.media.height, face_cx)
-    if geom is None:
-        crop_vf = (
-            f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
-            f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2"
-        )
-    else:
-        crop_w, crop_h, x, y = geom
-        crop_vf = f"crop={crop_w}:{crop_h}:{x}:{y},scale={TARGET_W}:{TARGET_H}"
-
+    reframe = _reframe_fc()
     measured = _measure_loudness(video, cut)
     audio_filter = _loudnorm_filter(measured)
 
     with _cwd(out_dir):
+        # blurred-fit video (subtitles chained on) -> [v]; loudnorm'd audio -> [a]
         run(
             [
                 "-y",
                 "-ss", str(cut.t0),
                 "-i", str(video),
                 "-t", str(cut.t1 - cut.t0),
-                "-vf", f"{crop_vf},subtitles={ass_path.name}:fontsdir={_FONTS_DIR}",
-                "-af", audio_filter,
+                "-filter_complex",
+                f"{reframe},subtitles={ass_path.name}:fontsdir={_FONTS_DIR}[v];"
+                f"[0:a]{audio_filter}[a]",
+                "-map", "[v]",
+                "-map", "[a]",
                 "-c:v", "libx264",
                 "-c:a", "aac",
                 "-pix_fmt", "yuv420p",
@@ -193,7 +160,8 @@ def render_clip(
                 "-ss", str(cut.t0),
                 "-i", str(video),
                 "-frames:v", "1",
-                "-vf", crop_vf,
+                "-filter_complex", f"{reframe}[v]",
+                "-map", "[v]",
                 thumb.name,
             ]
         )
@@ -202,11 +170,13 @@ def render_clip(
 
 
 if __name__ == "__main__":
-    # ponytail: quick manual self-check of the pure crop-geometry function
-    # only -- rendering itself is exercised by tests/test_render.py (needs
-    # real media). Run `python -m shorts.render.renderer`.
-    assert _crop_geometry(1920, 1080, None) == (607, 1080, 656, 0)  # center crop
-    assert _crop_geometry(1920, 1080, 0.0) == (607, 1080, 0, 0)  # clamped left
-    assert _crop_geometry(1920, 1080, 1.0) == (607, 1080, 1313, 0)  # clamped right
-    assert _crop_geometry(1080, 1920, None) is None  # already portrait -> no crop
+    # ponytail: quick manual self-check of the reframe filtergraph shape only
+    # -- rendering itself is exercised by tests/test_render.py (needs real
+    # media). Run `python -m shorts.render.renderer`.
+    fc = _reframe_fc()
+    assert fc.startswith("[0:v]split=2[bg][fg];")  # both branches fed
+    assert "force_original_aspect_ratio=increase" in fc  # blurred bg fills
+    assert "force_original_aspect_ratio=decrease" in fc  # fg fits whole, uncropped
+    assert "gblur" in fc and "overlay=(W-w)/2:(H-h)/2" in fc  # blur + center
+    assert not fc.rstrip().endswith("]")  # unlabeled tail, caller appends
     print("renderer self-check OK")

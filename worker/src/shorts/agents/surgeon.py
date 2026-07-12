@@ -27,7 +27,7 @@ _SILENCE_SEARCH_BACK_S = 5.0
 _FILLER_SCAN_WINDOW_S = 2.0
 _TRAILING_ROOM_MAX_S = 0.8
 _TIE_BREAK_AMBIGUITY_S = 2.0
-_MIN_DUR_S = 5.0
+_MIN_DUR_S = 30.0
 _MAX_DUR_S = 90.0
 
 TIE_BREAK_SCHEMA = {
@@ -205,7 +205,7 @@ def refine(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Cut:
     failing that, a word start) with leading fillers stripped; t1 snaps to
     a word end plus up to 0.8s of trailing room. Media/duration bounds are
     enforced last and take priority over the snap -- a clip can never
-    extend past the real video or outside [5, 90]s, even if that means
+    extend past the real video or outside [30, 90]s, even if that means
     giving up exact word/silence alignment at the very edge of the source."""
     t0 = _snap_t0(cand, idx, log)
     t0 = _strip_leading_fillers(t0, idx)

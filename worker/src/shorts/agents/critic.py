@@ -6,7 +6,7 @@ go through); a component whose evidence doesn't resolve gets ONE re-ask
 carrying the violation reasons, and is VOIDED (forced to 0) if it still
 doesn't resolve after that.
 
-Verdict: total>=70 keep, total<=45 kill, else borderline -- identical in
+Verdict: total>=62 keep, total<=45 kill, else borderline -- identical in
 both modes. LIVE mode asks the LLM (one scoring call plus at most one
 re-ask); STUB mode (SHORTS_LLM=stub, the default -- no API key needed) has
 no LLM to ask, so scoring is a deterministic function of the candidate's
@@ -22,7 +22,7 @@ from shorts.types import Candidate, Claim, Scored, SignalIndex, Span
 
 COMPONENTS = ("hook_strength", "payoff", "emotion", "quotability")
 MAX_COMPONENT_SCORE = 25
-KEEP_THRESHOLD = 70
+KEEP_THRESHOLD = 62
 KILL_THRESHOLD = 45
 
 CRITIC_LLM_SCHEMA = {

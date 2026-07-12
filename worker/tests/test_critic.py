@@ -102,9 +102,9 @@ def test_stub_score_is_deterministic(tmp_path):
 
 
 def test_verdict_boundaries():
-    """Test the exact boundary thresholds: >=70 keep, <=45 kill, else borderline."""
-    assert _verdict(70) == "keep"
-    assert _verdict(69) == "borderline"
+    """Test the exact boundary thresholds: >=62 keep, <=45 kill, else borderline."""
+    assert _verdict(62) == "keep"
+    assert _verdict(61) == "borderline"
     assert _verdict(46) == "borderline"
     assert _verdict(45) == "kill"
 

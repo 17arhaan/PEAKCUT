@@ -320,7 +320,7 @@ def test_tie_break_stub_mode_falls_back_to_earlier_target(tmp_path, monkeypatch)
 
 def test_refine_clamps_duration_to_media_bounds(tmp_path):
     """A candidate near the very end of a short media file: snapping alone
-    would produce a sub-5s cut, so the duration floor extends it -- but
+    would produce a sub-30s cut, so the duration floor extends it -- but
     never past media.duration_s."""
     idx = _mk_index(
         media=MediaInfo(duration_s=10.0, fps=30.0, width=1920, height=1080),

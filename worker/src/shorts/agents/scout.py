@@ -23,7 +23,7 @@ from shorts.signals.index import events_in, peaks_in
 from shorts.types import Candidate, Claim, SignalIndex, Span
 
 MAX_CANDIDATES = 20
-MIN_LEN_S = 10.0
+MIN_LEN_S = 30.0
 MAX_LEN_S = 90.0
 
 # rule (a): energy peak <-> rate surge proximity
@@ -49,7 +49,7 @@ def _iou(a: Candidate, b: Candidate) -> float:
 
 
 def _clamp_windows(t0: float, t1: float, duration: float) -> list[tuple[float, float]]:
-    """Clamp a raw (t0, t1) window to [0, duration] and to a 10-90s length.
+    """Clamp a raw (t0, t1) window to [0, duration] and to a 30-90s length.
     Short windows are padded symmetrically (bounded by the video edges).
     Long windows are split into 2+ *equal-sized* chunks -- rather than
     fixed-90s chunks plus a short leftover tail, which could dip below
