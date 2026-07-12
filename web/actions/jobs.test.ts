@@ -323,4 +323,39 @@ describe("reRenderStyle", () => {
     expect(row.status).toBe("failed");
     expect(row.error).toBe("render spawn failed");
   });
+
+  it("CONCURRENCY: two concurrent reRenderStyle calls on the same done job → exactly one spawns worker, other gets not-done error", async () => {
+    mockAuth.mockResolvedValue({ user: { id: userId } } as never);
+    const job = await makeJob("done");
+
+    // Track which calls the mock receives (to verify exactly one succeeds).
+    let renderCalls = 0;
+    mockWorkerRenderStyle.mockImplementationOnce(async () => {
+      renderCalls++;
+    });
+
+    // Fire two concurrent reRenderStyle calls on the same done job. The first
+    // UPDATE ... WHERE status='done' will flip the status to 'processing' and
+    // return the row (renderStyle gets called). The second UPDATE will see
+    // status='processing' (not 'done'), return no rows, and throw "not done"
+    // without spawning renderStyle.
+    const [result1, result2] = await Promise.allSettled([
+      reRenderStyle(job.id, "s1"),
+      reRenderStyle(job.id, "s2"),
+    ]);
+
+    // Exactly one should succeed (the first one to acquire the lock).
+    expect(result1.status === "fulfilled" ? 1 : 0).toEqual(1);
+
+    // The other should reject with the not-done error.
+    expect(result2.status).toBe("rejected");
+    expect((result2 as any).reason.message).toMatch(/completed/i);
+
+    // The mock should have been called exactly once (by whichever call won).
+    expect(renderCalls).toBe(1);
+
+    // Job should be in processing state (the winner flipped it).
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+    expect(row.status).toBe("processing");
+  });
 });

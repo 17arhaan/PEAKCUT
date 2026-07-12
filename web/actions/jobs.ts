@@ -1,7 +1,7 @@
 "use server";
 
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
@@ -137,6 +137,12 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
  * pattern as getJobStatusForOwner (lib/job-status.ts) -- a non-owner can't
  * distinguish "doesn't exist" from "isn't yours".
  *
+ * CONCURRENCY: The status==='done' check and the UPDATE are atomic (single
+ * compare-and-swap via UPDATE ... WHERE status='done' RETURNING). If the
+ * returning array is empty, the job wasn't 'done' (already restyling, or
+ * not owner, or gone) → return the appropriate error WITHOUT spawning the
+ * worker. Only call worker.renderStyle when the CAS actually flipped the row.
+ *
  * ponytail: restyle is free -- no crew/whisper cost, just a fast re-render
  * of already-scored clips. No debit/refund here (unlike createJob). Revisit
  * if render compute ever needs metering.
@@ -152,19 +158,28 @@ export async function reRenderStyle(jobId: string, style: string): Promise<void>
     throw new Error(`invalid style: ${style}`);
   }
 
+  // Pre-check: job exists and is owned by the caller. This allows us to give
+  // a better error message than "not done" if the job doesn't exist or isn't
+  // owned (collapsing not-found and not-owned to the same message, same as
+  // getJobStatusForOwner). The ownership check here is a guard; the atomicity
+  // check below (UPDATE ... WHERE status='done') is the concurrency guard.
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job || job.userId !== userId) {
     throw new Error("job not found");
   }
 
-  if (job.status !== "done") {
-    throw new Error("only a completed job can be restyled");
-  }
-
-  await db
+  // Atomic compare-and-swap: update status to processing IF currently done.
+  // If the update returns no rows, the job wasn't 'done' (already restyling
+  // from another request, or status changed since the pre-check above).
+  const [updated] = await db
     .update(jobs)
     .set({ status: "processing", stage: "restyle", progress: 0, updatedAt: new Date() })
-    .where(eq(jobs.id, jobId));
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, "done")))
+    .returning();
+
+  if (!updated) {
+    throw new Error("only a completed job can be restyled");
+  }
 
   try {
     await worker.renderStyle({ id: jobId, workdir: jobWorkDir(jobId), style: style as CaptionStyle });

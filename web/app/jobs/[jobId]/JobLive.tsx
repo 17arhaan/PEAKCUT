@@ -121,16 +121,15 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
 /**
  * W11 caption-style switcher: re-renders the clip grid's media in a
  * different karaoke caption preset without re-running the pipeline. Only
- * enabled when the job is 'done' (reRenderStyle server-side rejects any
- * other status) -- `jobStatus` alone gates both the buttons and the
- * "Applying…" indicator below, so there's no separate pending flag to
- * reconcile against the poll: the moment onRestyled reports a non-'done'
- * status, the indicator shows; the moment it's 'done' again, it doesn't.
- * `pendingStyle` only remembers WHICH style is in flight for that label --
- * it's set optimistically on click (before the server action round-trips),
- * which matters for e2e under STUB_WORKER (lib/worker.ts's
- * StubWorker.renderStyle is a no-op, so the job never reaches 'done' again
- * on its own -- the test only needs to observe 'processing' + the label).
+ * enabled when the job is 'done' and no restyle is in flight (reRenderStyle
+ * server-side rejects any other status). `pendingStyle` gates the buttons
+ * while a restyle request is in flight, preventing double-clicks from firing
+ * multiple concurrent restyles. `pendingStyle` remembers WHICH style is in
+ * flight for the "Applying…" label -- it's set optimistically on click
+ * (before the server action round-trips), which matters for e2e under
+ * STUB_WORKER (lib/worker.ts's StubWorker.renderStyle is a no-op, so the
+ * job never reaches 'done' again on its own -- the test only needs to observe
+ * 'processing' + the label).
  */
 function StyleSelector({
   jobId,
@@ -159,7 +158,7 @@ function StyleSelector({
     }
   }
 
-  const canRestyle = jobStatus === "done";
+  const canRestyle = jobStatus === "done" && !pendingStyle;
 
   return (
     <div className="flex flex-col gap-2">
