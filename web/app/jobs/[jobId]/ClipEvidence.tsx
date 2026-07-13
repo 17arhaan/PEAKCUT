@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +9,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
 import {
   formatClaim,
   humanizeComponent,
@@ -37,23 +35,49 @@ const COMPONENT_ORDER = ["hook_strength", "payoff", "emotion", "quotability"];
  * for the disabled placeholder button it used to render. Reads only
  * clip.evidence/clip.qa, already delivered by the status route -- no extra
  * fetch.
+ *
+ * The dialog portals to <body>, outside the page's `.landing peakcut-app`
+ * scope, so DialogContent re-declares those classes to pull the instrument-
+ * panel tokens (--signal/--panel/--line) and dark shadcn theme in with it.
  */
 export function ClipEvidence({ clip }: { clip: JobStatusClip }) {
   const { evidence, qa } = clip;
 
   return (
     <Dialog>
-      <DialogTrigger render={<Button size="sm" variant="ghost" />}>Why this clip →</DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-2 font-mono-data text-xs text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--signal)]"
+          />
+        }
+      >
+        Why this clip →
+      </DialogTrigger>
+      <DialogContent className="landing dark peakcut-app max-h-[85vh] overflow-y-auto border border-[var(--line)] bg-[var(--panel-raised)] text-[var(--text)] sm:max-w-lg">
+        {/* signal accent along the top edge — this is the receipt */}
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--signal)]/60 to-transparent"
+        />
         <DialogHeader>
-          <DialogTitle>Why this clip</DialogTitle>
-          <DialogDescription>Clip {clip.index}</DialogDescription>
+          <span className="font-mono-data text-[10px] tracking-[0.18em] text-[var(--signal)]">
+            EVIDENCE LOG
+          </span>
+          <DialogTitle className="font-display text-xl font-extrabold tracking-tight">
+            Why this clip
+          </DialogTitle>
+          <DialogDescription className="font-mono-data text-xs text-[var(--muted)]">
+            Clip {clip.index}
+          </DialogDescription>
         </DialogHeader>
 
         {!evidence ? (
-          <p className="text-sm text-muted-foreground">No evidence recorded for this clip.</p>
+          <p className="text-sm text-[var(--muted)]">No evidence recorded for this clip.</p>
         ) : (
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-6">
             <ScoreHeader score={evidence.score} />
 
             {evidence.score ? <ComponentBreakdown components={evidence.score.components} /> : null}
@@ -70,14 +94,46 @@ export function ClipEvidence({ clip }: { clip: JobStatusClip }) {
   );
 }
 
+function SectionHeader({ children }: { children: string }) {
+  return (
+    <h3 className="flex items-center gap-2 font-mono-data text-[10px] tracking-[0.15em] text-[var(--muted)] uppercase">
+      <span className="text-[var(--signal)]">▸</span>
+      {children}
+    </h3>
+  );
+}
+
+function Claim({ text }: { text: string }) {
+  return (
+    <li className="flex items-baseline gap-2 font-mono-data text-xs text-[var(--muted)]">
+      <span className="text-[var(--signal)]/70">·</span>
+      <span className="text-[color-mix(in_oklab,var(--text)_75%,transparent)]">{text}</span>
+    </li>
+  );
+}
+
 function ScoreHeader({ score }: { score: Score | null }) {
   if (!score) {
-    return <p className="text-sm text-muted-foreground">No score recorded.</p>;
+    return <p className="text-sm text-[var(--muted)]">No score recorded.</p>;
   }
+  const kept = score.verdict === "keep";
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-2xl font-semibold">{score.total}/100</span>
-      <Badge variant={score.verdict === "keep" ? "default" : "outline"}>{score.verdict}</Badge>
+    <div className="flex items-end justify-between rounded-xl border border-[var(--line)] bg-[var(--ink)]/40 px-4 py-3">
+      <div className="flex flex-col">
+        <span className="font-mono-data text-[10px] tracking-[0.15em] text-[var(--muted)]">SCORE</span>
+        <span className="font-display text-3xl font-extrabold tabular-nums text-[var(--signal)]">
+          {score.total}/100
+        </span>
+      </div>
+      <span
+        className={`rounded-full border px-2.5 py-1 font-mono-data text-[11px] tracking-wide ${
+          kept
+            ? "border-[var(--signal)]/40 bg-[var(--signal)]/12 text-[var(--signal)]"
+            : "border-[var(--line)] bg-[var(--panel)] text-[var(--muted)]"
+        }`}
+      >
+        {score.verdict}
+      </span>
     </div>
   );
 }
@@ -87,23 +143,29 @@ function ComponentBreakdown({ components }: { components: Record<string, ScoreCo
   if (keys.length === 0) return null;
 
   return (
-    <section className="flex flex-col gap-3">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Component breakdown</h3>
+    <section className="flex flex-col gap-4">
+      <SectionHeader>Component breakdown</SectionHeader>
       {keys.map((key) => {
         const component = components[key];
+        const pct = Math.max(0, Math.min(100, (component.score / COMPONENT_MAX) * 100));
         return (
-          <div key={key} className="flex flex-col gap-1">
+          <div key={key} className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">{humanizeComponent(key)}</span>
-              <span className="text-muted-foreground tabular-nums">
+              <span className="font-medium text-[var(--text)]">{humanizeComponent(key)}</span>
+              <span className="font-mono-data text-xs text-[var(--muted)] tabular-nums">
                 {component.score}/{COMPONENT_MAX}
               </span>
             </div>
-            <Progress value={component.score} max={COMPONENT_MAX} />
+            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--line)]">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[var(--signal-dim)] to-[var(--signal)]"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
             {component.evidence.length > 0 ? (
-              <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+              <ul className="mt-1 flex flex-col gap-0.5">
                 {component.evidence.map((claim, i) => (
-                  <li key={i}>{formatClaim(claim)}</li>
+                  <Claim key={i} text={formatClaim(claim)} />
                 ))}
               </ul>
             ) : null}
@@ -116,13 +178,13 @@ function ComponentBreakdown({ components }: { components: Record<string, ScoreCo
 
 function CandidateSection({ candidate }: { candidate: Candidate }) {
   return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Why it was picked</h3>
-      <p className="text-sm">{humanizeSource(candidate.source)}</p>
+    <section className="flex flex-col gap-2">
+      <SectionHeader>Why it was picked</SectionHeader>
+      <p className="text-sm text-[var(--text)]">{humanizeSource(candidate.source)}</p>
       {candidate.evidence.length > 0 ? (
-        <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+        <ul className="flex flex-col gap-0.5">
           {candidate.evidence.map((claim, i) => (
-            <li key={i}>{formatClaim(claim)}</li>
+            <Claim key={i} text={formatClaim(claim)} />
           ))}
         </ul>
       ) : null}
@@ -132,11 +194,17 @@ function CandidateSection({ candidate }: { candidate: Candidate }) {
 
 function RepairsTimeline({ repairs }: { repairs: Repair[] }) {
   return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">What happened to it</h3>
-      <ul className="flex flex-col gap-0.5 text-sm">
+    <section className="flex flex-col gap-2">
+      <SectionHeader>What happened to it</SectionHeader>
+      <ul className="flex flex-col gap-2 border-l border-[var(--line)] pl-4">
         {repairs.map((repair, i) => (
-          <li key={i}>{humanizeRepair(repair)}</li>
+          <li key={i} className="relative text-sm text-[var(--text)]">
+            <span
+              aria-hidden
+              className="absolute top-1.5 -left-[1.3rem] size-2 rounded-full border border-[var(--signal)]/50 bg-[var(--panel-raised)]"
+            />
+            {humanizeRepair(repair)}
+          </li>
         ))}
       </ul>
     </section>
@@ -147,18 +215,19 @@ function QaSection({ qa }: { qa: Qa | null }) {
   if (!qa) return null;
 
   return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Quality checks</h3>
+    <section className="flex flex-col gap-2">
+      <SectionHeader>Quality checks</SectionHeader>
       {qa.passed ? (
-        <Badge variant="outline" className="w-fit text-emerald-600 dark:text-emerald-400">
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono-data text-xs text-emerald-400">
+          <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
           Passed all checks
-        </Badge>
+        </span>
       ) : (
         <ul className="flex flex-col gap-1 text-sm">
           {qa.failures.map((failure, i) => (
             <li key={i}>
-              <span className="font-medium">{humanizeQaCode(failure.code)}</span>
-              <span className="text-muted-foreground"> — {failure.detail}</span>
+              <span className="font-medium text-[var(--text)]">{humanizeQaCode(failure.code)}</span>
+              <span className="text-[var(--muted)]"> — {failure.detail}</span>
             </li>
           ))}
         </ul>

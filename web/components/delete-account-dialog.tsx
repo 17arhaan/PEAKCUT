@@ -51,7 +51,7 @@ export function DeleteAccountDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button variant="destructive" />}>Delete account</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="landing dark peakcut-app border border-[var(--line)] bg-[var(--panel-raised)] text-[var(--text)]">
         <DialogHeader>
           <DialogTitle>Delete account</DialogTitle>
           <DialogDescription>
