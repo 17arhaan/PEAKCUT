@@ -1,4 +1,4 @@
-# Shorts Factory — web app setup
+# Peakcut — web app setup
 
 Local-first: everything through the full task list runs with zero external
 accounts. `docker compose up -d db` + `npm run dev` is the whole story.
