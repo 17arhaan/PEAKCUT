@@ -147,19 +147,15 @@ test.describe("job live view", () => {
 
     await page.goto(`/jobs/${job.id}`);
 
-    // Stage label humanized from job.stage.
-    await expect(page.getByText("Analyzing audio & video")).toBeVisible();
+    // Pipeline view renders the current stage + progress from job.stage/progress.
+    await expect(page.getByText("PROCESSING", { exact: true })).toBeVisible();
+    await expect(page.getByText("Measuring every second").first()).toBeVisible();
+    await expect(page.getByText("40% complete")).toBeVisible();
 
-    // Progress bar reflects job.progress (0..1 -> 0..100).
-    const progressbar = page.getByRole("progressbar");
-    await expect(progressbar).toBeVisible();
-    await expect(progressbar).toHaveAttribute("aria-valuenow", "40");
-
-    // Activity feed shows the humanized event.
+    // Live crew feed shows the humanized event.
     await expect(page.getByText("Scout found 3 moments")).toBeVisible();
 
-    // No clips yet -> the early/empty state, not the clip grid.
-    await expect(page.getByText("Working on your clips…")).toBeVisible();
+    // No clips yet -> no clip videos.
     await expect(page.locator("video")).toHaveCount(0);
   });
 });

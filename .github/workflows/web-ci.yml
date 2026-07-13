@@ -57,7 +57,11 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        # `npm install` (not `npm ci`): Tailwind's native engine pulls
+        # platform-specific optional deps (@emnapi/* on Linux) that a
+        # macOS-generated lock can't fully pin, so let npm resolve them for
+        # the runner's platform instead of hard-failing on a lock mismatch.
+        run: npm install --no-audit --no-fund
 
       - name: Push DB schema
         run: npx drizzle-kit push --force

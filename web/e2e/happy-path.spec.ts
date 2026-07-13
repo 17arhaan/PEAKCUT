@@ -39,8 +39,7 @@ test.describe("happy path", () => {
 
     // Live view shows progress before the stub fixture import lands (see
     // STUB_IMPORT_DELAY_MS) -- same immediate state new-job.spec.ts checks.
-    await expect(page.getByText("Downloading")).toBeVisible();
-    await expect(page.getByText("Working on your clips…")).toBeVisible();
+    await expect(page.getByText("PROCESSING", { exact: true })).toBeVisible();
 
     // Wait out the stub's fixture import (real importRun run against
     // test/fixtures/run.fixture.json -- 4 clips, one dropped as BLACK).

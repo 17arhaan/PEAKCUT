@@ -102,7 +102,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
                   htmlFor="email"
                   className="font-mono-data text-[11px] tracking-wide text-[var(--muted)] uppercase"
                 >
-                  Email {!googleEnabled && "· dev sign-in"}
+                  Email {!googleEnabled && "(dev sign-in)"}
                 </label>
                 <input
                   id="email"
