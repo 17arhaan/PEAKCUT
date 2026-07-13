@@ -95,6 +95,14 @@ def main(argv: list[str] | None = None) -> None:
     )
     render_parser.add_argument("--style", required=True, help="caption style to render with")
 
+    meta_parser = subparsers.add_parser(
+        "publish-metadata",
+        help="write YouTube Shorts publish.json (title/description/hashtags/tags) for each kept clip",
+    )
+    meta_parser.add_argument(
+        "--from", dest="workdir", required=True, help="a prior `shorts run`'s output directory"
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -113,6 +121,12 @@ def main(argv: list[str] | None = None) -> None:
 
         results = render_style(Path(args.workdir), args.style)
         print(f"wrote {len(results)} clip(s) styled {args.style!r} to {args.workdir}")
+        sys.exit(0)
+    elif args.command == "publish-metadata":
+        from shorts.publish.generate import generate_youtube_metadata
+
+        written = generate_youtube_metadata(Path(args.workdir))
+        print(f"wrote {len(written)} publish.json file(s) under {args.workdir}")
         sys.exit(0)
 
 
