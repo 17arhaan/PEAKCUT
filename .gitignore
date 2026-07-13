@@ -12,3 +12,7 @@ worker/src/*.egg-info/
 # scratch downloads used once by scripts/make_fixtures.py -- not committed,
 # the built fixtures under worker/tests/fixtures/ are what's tracked.
 worker/tests/assets/
+graphify-out/
+
+# Claude Code agent worktrees / local session scratch -- never committed.
+.claude/
