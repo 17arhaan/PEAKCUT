@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A small command-line front end over {@link PeakcutClient}. Build the fat jar with
@@ -186,6 +187,11 @@ public final class PeakcutCli {
 
     /** Minimal {@code --key value} / {@code --flag} / positional argument parser. */
     static final class Args {
+        /** Options that are boolean flags and never consume the next token —
+         *  without this, {@code --watch job_123} would eat the positional
+         *  jobId as the flag's "value". */
+        private static final Set<String> BOOLEAN_FLAGS = Set.of("watch");
+
         private final Map<String, String> options = new HashMap<>();
         private final List<String> positionals = new ArrayList<>();
 
@@ -195,7 +201,9 @@ public final class PeakcutCli {
                 String tok = argv[i];
                 if (tok.startsWith("--")) {
                     String key = tok.substring(2);
-                    if (i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+                    if (!BOOLEAN_FLAGS.contains(key)
+                            && i + 1 < argv.length
+                            && !argv[i + 1].startsWith("--")) {
                         a.options.put(key, argv[++i]);
                     } else {
                         a.options.put(key, "true"); // bare flag

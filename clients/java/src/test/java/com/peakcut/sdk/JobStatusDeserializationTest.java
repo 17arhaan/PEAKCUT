@@ -43,7 +43,7 @@ class JobStatusDeserializationTest {
                 "components": [
                   {"name": "hook_strength", "score": 22,
                    "evidence": [{"kind": "quote", "t": 654.0, "value": "No. I never smile."}]},
-                  {"name": "payoff", "score": 18, "evidence": []}
+                  {"name": "payoff", "score": 0, "evidence": []}
                 ]
               }
             },
