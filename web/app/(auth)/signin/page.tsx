@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { signIn } from "@/auth";
 import { env } from "@/lib/env";
 import { Button } from "@/components/ui/button";
@@ -35,10 +36,15 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
       </div>
 
       <div className="w-full max-w-sm">
-        <Link href="/" className="mb-8 flex items-center justify-center">
-          <span className="font-display text-lg font-extrabold tracking-tight text-[var(--text)]">
-            Peakcut
-          </span>
+        <Link href="/" aria-label="Peakcut" className="mb-8 flex items-center justify-center">
+          <Image
+            src="/peakcut-wordmark.png"
+            alt="Peakcut"
+            width={1481}
+            height={267}
+            priority
+            className="h-8 w-auto"
+          />
         </Link>
 
         <div className="signal-glow rounded-2xl border border-[var(--line)] bg-[color-mix(in_oklab,var(--panel)_88%,transparent)] p-7 backdrop-blur-sm">

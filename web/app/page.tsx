@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { AmbientTrace } from "./_components/landing/ambient-trace";
 import { HeroSection } from "./_components/landing/hero-section";
@@ -16,9 +17,16 @@ export default function Home() {
 
       <header className="relative z-10 border-b border-[var(--line)]">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
-          <span className="font-display text-sm font-extrabold tracking-tight">
-            Peakcut
-          </span>
+          <Link href="/" aria-label="Peakcut" className="flex items-center">
+            <Image
+              src="/peakcut-wordmark.png"
+              alt="Peakcut"
+              width={1481}
+              height={267}
+              priority
+              className="h-6 w-auto"
+            />
+          </Link>
           <nav className="hidden items-center gap-6 font-mono-data text-xs text-[var(--muted)] sm:flex">
             <a href="#how-it-works" className="transition-colors hover:text-[var(--text)]">
               How it works
@@ -58,9 +66,13 @@ export default function Home() {
         <div className="mx-auto w-full max-w-6xl px-6 py-12">
           <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
             <div className="flex max-w-xs flex-col gap-3">
-              <span className="font-display text-base font-extrabold tracking-tight">
-                Peakcut
-              </span>
+              <Image
+                src="/peakcut-wordmark.png"
+                alt="Peakcut"
+                width={1481}
+                height={267}
+                className="h-6 w-auto self-start opacity-90"
+              />
               <p className="text-sm text-[var(--muted)]">
                 An agent crew scores every moment against measured signals — and
                 ships each clip with the evidence behind its score.
