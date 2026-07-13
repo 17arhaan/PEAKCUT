@@ -6,11 +6,19 @@ name: web-ci
 # secret-shaped env var below is a fixed dummy value, not a repo secret.
 on:
   push:
-    branches:
-      - "build/**"
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-ci.yml"
   pull_request:
     paths:
       - "web/**"
+      - ".github/workflows/web-ci.yml"
+
+# A newer push supersedes an in-flight run of the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
