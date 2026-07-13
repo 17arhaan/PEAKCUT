@@ -99,8 +99,9 @@ def render_clip(
     style: str,
     out_dir: Path,
 ) -> tuple[Path, Path]:
-    """Cut [cut.t0, cut.t1) from `video`, crop/scale to 1080x1920 per the
-    crop fallback chain, burn in karaoke captions built from idx.words,
+    """Cut [cut.t0, cut.t1) from `video`, reframe to 1080x1920 via the
+    blurred-background fit (see `_reframe_fc` -- nothing cropped), burn in
+    karaoke captions built from idx.words,
     loudness-normalize audio to -14 LUFS, and export a thumbnail at
     cut.t0. Writes clip.mp4 + thumb.jpg (+ clip.ass) into `out_dir`.
     `hook`, if given, burns its title into the top safe area for the first
