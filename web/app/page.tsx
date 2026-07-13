@@ -52,27 +52,54 @@ export default function Home() {
         <Pricing />
       </main>
 
-      <footer className="relative z-10 border-t border-[var(--line)] bg-[var(--panel)]/30">
-        <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-2 px-6 py-8 text-center sm:flex-row sm:justify-between sm:text-left">
-          <div className="flex flex-col gap-1">
-            <span className="font-display text-sm font-bold">
-              Peakcut
-            </span>
-            <span className="font-mono-data text-xs text-[var(--muted)]">
-              Every clip ships with its receipts.
-            </span>
+      <footer className="relative z-10 border-t border-[var(--line)] bg-[color-mix(in_oklab,var(--panel)_45%,transparent)]">
+        {/* thin signal accent along the top edge */}
+        <div aria-hidden className="h-px w-full bg-gradient-to-r from-transparent via-[var(--signal)]/40 to-transparent" />
+        <div className="mx-auto w-full max-w-6xl px-6 py-12">
+          <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
+            <div className="flex max-w-xs flex-col gap-3">
+              <span className="font-display text-base font-extrabold tracking-tight">
+                Peakcut
+              </span>
+              <p className="text-sm text-[var(--muted)]">
+                An agent crew scores every moment against measured signals — and
+                ships each clip with the evidence behind its score.
+              </p>
+              <span className="font-mono-data text-[11px] tracking-[0.15em] text-[var(--signal)]">
+                SIGNAL-DRIVEN CLIP ENGINE
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-10 sm:gap-20">
+              <div className="flex flex-col gap-3">
+                <span className="font-mono-data text-[11px] tracking-wide text-[var(--muted)] uppercase">
+                  Product
+                </span>
+                <a href="#how-it-works" className="text-sm text-[var(--muted)] transition-colors hover:text-[var(--text)]">
+                  How it works
+                </a>
+                <a href="#pricing" className="text-sm text-[var(--muted)] transition-colors hover:text-[var(--text)]">
+                  Pricing
+                </a>
+              </div>
+              <div className="flex flex-col gap-3">
+                <span className="font-mono-data text-[11px] tracking-wide text-[var(--muted)] uppercase">
+                  Account
+                </span>
+                <Link href="/signin" className="text-sm text-[var(--muted)] transition-colors hover:text-[var(--text)]">
+                  Sign in
+                </Link>
+                <Link href="/dashboard" className="text-sm text-[var(--muted)] transition-colors hover:text-[var(--text)]">
+                  Dashboard
+                </Link>
+              </div>
+            </div>
           </div>
-          <nav className="flex items-center gap-5 font-mono-data text-xs text-[var(--muted)]">
-            <a href="#how-it-works" className="transition-colors hover:text-[var(--text)]">
-              How it works
-            </a>
-            <a href="#pricing" className="transition-colors hover:text-[var(--text)]">
-              Pricing
-            </a>
-            <Link href="/signin" className="transition-colors hover:text-[var(--text)]">
-              Sign in
-            </Link>
-          </nav>
+
+          <div className="mt-10 flex flex-col items-start gap-2 border-t border-[var(--line)] pt-6 font-mono-data text-xs text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
+            <span>© {new Date().getFullYear()} Peakcut</span>
+            <span>Every clip ships with its receipts.</span>
+          </div>
         </div>
       </footer>
     </div>
