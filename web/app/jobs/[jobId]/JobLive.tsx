@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Download, Loader2 } from "lucide-react";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { ClipEvidence } from "@/app/jobs/[jobId]/ClipEvidence";
 import { PipelineLive } from "@/app/jobs/[jobId]/Pipeline";
+import { Stagger, StaggerItem } from "@/app/_components/motion";
 import { reRenderStyle } from "@/actions/jobs";
 import { humanizeStage } from "@/lib/job-events";
 import type { JobStatus, JobStatusClip } from "@/lib/job-status";
@@ -57,14 +56,17 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
   return (
     <div className="flex flex-col gap-6">
       {data.status === "failed" ? (
-        <Card className="border border-destructive/40 bg-destructive/10">
-          <CardHeader>
-            <CardTitle className="text-destructive">Job failed</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-destructive">
+        <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-6">
+          <span className="font-mono-data text-[11px] tracking-[0.15em] text-destructive">
+            FAILED
+          </span>
+          <h1 className="mt-1 font-display text-xl font-extrabold tracking-tight text-destructive">
+            Job failed
+          </h1>
+          <p className="mt-2 text-sm text-destructive/90">
             {data.error ?? "Something went wrong."}
-          </CardContent>
-        </Card>
+          </p>
+        </div>
       ) : data.status === "done" ? (
         <div className="flex items-center justify-between">
           <div>
@@ -74,6 +76,9 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
             <h1 className="font-display text-2xl font-extrabold tracking-tight">
               Your clips are ready.
             </h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {data.clips.filter((c) => c.status !== "dropped").length} clips, each with the evidence behind its score.
+            </p>
           </div>
           <JobStatusBadge status={data.status} />
         </div>
@@ -97,11 +102,13 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
       ) : null}
 
       {hasClips ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" amount={0.05}>
           {data.clips.map((clip) => (
-            <ClipCard key={clip.index} clip={clip} />
+            <StaggerItem key={clip.index} hover={clip.status !== "dropped"} className="h-full">
+              <ClipCard clip={clip} />
+            </StaggerItem>
           ))}
-        </div>
+        </Stagger>
       ) : null}
     </div>
   );
@@ -151,23 +158,38 @@ function StyleSelector({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Caption style:</span>
-        {CAPTION_STYLES.map((style) => (
-          <Button
-            key={style}
-            size="sm"
-            variant={activeStyle === style ? "default" : "outline"}
-            disabled={!canRestyle}
-            onClick={() => handleClick(style)}
-          >
-            {STYLE_LABELS[style]}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-mono-data text-[11px] tracking-wide text-[var(--muted)] uppercase">
+          Caption style:
+        </span>
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--panel)]/50 p-1">
+          {CAPTION_STYLES.map((style) => {
+            const isActive = activeStyle === style;
+            return (
+              <button
+                key={style}
+                type="button"
+                disabled={!canRestyle}
+                onClick={() => handleClick(style)}
+                aria-pressed={isActive}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  isActive
+                    ? "bg-[var(--signal)] text-[var(--ink)] shadow-[0_0_16px_-4px_rgba(245,179,1,0.6)]"
+                    : "text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]"
+                }`}
+              >
+                {STYLE_LABELS[style]}
+              </button>
+            );
+          })}
+        </div>
+        {pendingStyle && jobStatus === "processing" ? (
+          <span className="flex items-center gap-1.5 font-mono-data text-xs text-[var(--muted)]">
+            <Loader2 className="size-3 animate-spin text-[var(--signal)]" aria-hidden />
+            Applying {STYLE_LABELS[pendingStyle]}…
+          </span>
+        ) : null}
       </div>
-      {pendingStyle && jobStatus === "processing" ? (
-        <p className="text-sm text-muted-foreground">Applying {STYLE_LABELS[pendingStyle]}…</p>
-      ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
@@ -176,41 +198,52 @@ function StyleSelector({
 function ClipCard({ clip }: { clip: JobStatusClip }) {
   if (clip.status === "dropped") {
     return (
-      <Card className="opacity-60">
-        <CardHeader>
-          <CardTitle className="text-sm">Clip {clip.index}</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
+      <div className="flex h-full flex-col justify-center rounded-2xl border border-dashed border-[var(--line)] bg-[var(--panel)]/20 p-5">
+        <span className="font-mono-data text-[11px] tracking-[0.15em] text-[var(--muted)]">
+          CLIP {clip.index}
+        </span>
+        <p className="mt-1.5 text-sm text-[var(--muted)]">
           Dropped: {clip.dropped_reason ?? "unknown"}
-        </CardContent>
-      </Card>
+        </p>
+      </div>
     );
   }
 
   return (
-    <Card>
+    <div className="group flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]/50 transition-colors duration-200 hover:border-[var(--signal)]/40">
       {clip.mp4_url ? (
-        <video
-          src={clip.mp4_url}
-          poster={clip.thumb_url ?? undefined}
-          controls
-          className="aspect-[9/16] w-full rounded-t-xl bg-black object-cover"
-        />
-      ) : null}
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="line-clamp-2 text-sm">{clip.hook ?? `Clip ${clip.index}`}</CardTitle>
-          {clip.score !== null ? <Badge variant="outline">{clip.score}/100</Badge> : null}
+        <div className="relative aspect-[9/16] w-full overflow-hidden bg-black">
+          <video
+            src={clip.mp4_url}
+            poster={clip.thumb_url ?? undefined}
+            controls
+            className="h-full w-full object-cover"
+          />
+          {clip.score !== null ? (
+            <span className="pointer-events-none absolute right-2.5 top-2.5 rounded-full border border-[var(--signal)]/40 bg-[var(--ink)]/80 px-2.5 py-1 font-mono-data text-[11px] font-semibold tabular-nums text-[var(--signal)] backdrop-blur-sm">
+              {clip.score}/100
+            </span>
+          ) : null}
         </div>
-      </CardHeader>
-      <CardContent className="flex items-center justify-between gap-2">
-        <ClipEvidence clip={clip} />
-        {clip.mp4_url ? (
-          <Button size="sm" render={<a href={clip.mp4_url} download />}>
-            Download
-          </Button>
-        ) : null}
-      </CardContent>
-    </Card>
+      ) : null}
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <h3 className="line-clamp-2 font-display text-sm font-bold leading-snug tracking-tight">
+          {clip.hook ?? `Clip ${clip.index}`}
+        </h3>
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <ClipEvidence clip={clip} />
+          {clip.mp4_url ? (
+            <Button
+              size="sm"
+              render={<a href={clip.mp4_url} download />}
+              className="gap-1.5 bg-[var(--signal)] font-semibold text-[var(--ink)] transition-all hover:-translate-y-0.5 hover:bg-[color-mix(in_oklab,var(--signal)_92%,var(--text))]"
+            >
+              <Download className="size-3.5" aria-hidden />
+              Download
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }

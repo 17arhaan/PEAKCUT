@@ -1,26 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Plus, Sparkles } from "lucide-react";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { JobStatusBadge } from "@/components/job-status-badge";
 import { getJobsForUser, getUserBalance } from "@/lib/data";
 import type { jobs as jobsTable } from "@/lib/db/schema";
-import { formatRelativeTime } from "@/lib/utils";
+import { JobsList, type JobRow } from "./_components/jobs-list";
 
 type Job = typeof jobsTable.$inferSelect;
 
@@ -44,58 +29,66 @@ export default async function DashboardPage() {
 
   const [userJobs, balance] = await Promise.all([getJobsForUser(userId), getUserBalance(userId)]);
 
+  const rows: JobRow[] = userJobs.map((job) => ({
+    id: job.id,
+    status: job.status,
+    source: jobSource(job),
+    createdAt: job.createdAt,
+    durationCost: jobDurationCost(job),
+  }));
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{balance}</span> minutes remaining
-        </p>
-        <Button size="sm" render={<Link href="/dashboard/new" />}>
-          New job
-        </Button>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 sm:py-10">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <span className="font-mono-data text-[11px] tracking-[0.15em] text-[var(--signal)]">
+            WORKSPACE
+          </span>
+          <h1 className="font-display text-2xl font-extrabold tracking-tight">Your jobs</h1>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div
+            className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)]/60 px-3.5 py-1.5"
+            title="Minutes remaining"
+          >
+            <Sparkles className="size-3.5 text-[var(--signal)]" aria-hidden />
+            <span className="font-mono-data text-xs tabular-nums text-[var(--text)]">
+              <span className="font-semibold">{balance}</span>
+              <span className="text-[var(--muted)]"> min remaining</span>
+            </span>
+          </div>
+          <Button
+            render={<Link href="/dashboard/new" />}
+            className="signal-glow gap-1.5 bg-[var(--signal)] font-semibold text-[var(--ink)] transition-all hover:-translate-y-0.5 hover:bg-[color-mix(in_oklab,var(--signal)_92%,var(--text))]"
+          >
+            <Plus className="size-4" aria-hidden />
+            New job
+          </Button>
+        </div>
       </div>
 
-      {userJobs.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>No jobs yet</CardTitle>
-            <CardDescription>Paste a YouTube link to get your first clips.</CardDescription>
-          </CardHeader>
-          <CardFooter>
-            <Button render={<Link href="/dashboard/new" />}>New job</Button>
-          </CardFooter>
-        </Card>
+      {rows.length === 0 ? (
+        <div className="flex flex-col items-center gap-5 rounded-2xl border border-dashed border-[var(--line)] bg-[var(--panel)]/30 px-6 py-16 text-center">
+          <span className="flex size-12 items-center justify-center rounded-2xl bg-[var(--signal)]/12 text-[var(--signal)]">
+            <Sparkles className="size-6" aria-hidden />
+          </span>
+          <div className="flex flex-col gap-1.5">
+            <h2 className="font-display text-lg font-bold tracking-tight">No jobs yet</h2>
+            <p className="max-w-xs text-sm text-[var(--muted)]">
+              Paste a YouTube link to get your first clips.
+            </p>
+          </div>
+          <Button
+            render={<Link href="/dashboard/new" />}
+            className="signal-glow gap-1.5 bg-[var(--signal)] font-semibold text-[var(--ink)] transition-all hover:-translate-y-0.5 hover:bg-[color-mix(in_oklab,var(--signal)_92%,var(--text))]"
+          >
+            <Plus className="size-4" aria-hidden />
+            New job
+          </Button>
+        </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Status</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Duration / cost</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {userJobs.map((job) => (
-              <TableRow key={job.id}>
-                <TableCell>
-                  <Link href={`/jobs/${job.id}`} className="inline-flex">
-                    <JobStatusBadge status={job.status} />
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <Link href={`/jobs/${job.id}`} className="hover:underline">
-                    {jobSource(job)}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatRelativeTime(job.createdAt)}
-                </TableCell>
-                <TableCell className="text-muted-foreground">{jobDurationCost(job)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <JobsList jobs={rows} />
       )}
     </div>
   );

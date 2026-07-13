@@ -46,6 +46,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      // Tells Next.js our smooth scroll is intentional for anchor jumps but
+      // should be suppressed during route transitions (no animated scroll-to-top
+      // on navigation).
+      data-scroll-behavior="smooth"
       className={`${geistSans.variable} ${geistMono.variable} ${archivo.variable} ${plexMono.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>

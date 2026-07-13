@@ -3,16 +3,17 @@ import Image from "next/image";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { DeleteAccountDialog } from "@/components/delete-account-dialog";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getUserProfile } from "@/lib/data";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 
-function Row({ label, value }: { label: string; value: string }) {
+function Readout({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+    <div className="flex items-baseline justify-between gap-4 border-t border-[var(--line)] py-3 first:border-t-0">
+      <span className="font-mono-data text-[11px] tracking-wide text-[var(--muted)] uppercase">
+        {label}
+      </span>
+      <span className="font-mono-data text-sm tabular-nums text-[var(--text)]">{value}</span>
     </div>
   );
 }
@@ -53,29 +54,38 @@ export default async function SettingsPage() {
           <h1 className="font-display text-2xl font-extrabold tracking-tight">Your account</h1>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Profile</CardTitle>
-          </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          <Row label="Email" value={user.email} />
-          <Row label="Plan" value={user.plan} />
-          <Row label="Minutes balance" value={String(user.minutesBalance)} />
-          <Row label="Member since" value={DATE_FORMAT.format(user.createdAt)} />
-        </CardContent>
-      </Card>
+        <div className="rounded-2xl border border-[var(--line)] bg-[var(--panel)]/50 p-6">
+          <div className="flex items-center gap-4">
+            <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--signal)]/12 font-display text-lg font-bold text-[var(--signal)] uppercase">
+              {user.email.slice(0, 1)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate font-mono-data text-sm text-[var(--text)]">{user.email}</p>
+              <span className="mt-1 inline-flex items-center rounded-full border border-[var(--line)] bg-[var(--ink)]/40 px-2 py-0.5 font-mono-data text-[10px] tracking-[0.12em] text-[var(--signal)] uppercase">
+                {user.plan}
+              </span>
+            </div>
+          </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-destructive">Danger zone</CardTitle>
-          <CardDescription>
-            Permanently delete your account, all jobs, clips, and files. This cannot be undone.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DeleteAccountDialog />
-        </CardContent>
-        </Card>
+          <div className="mt-5">
+            <Readout label="Minutes balance" value={`${user.minutesBalance} min`} />
+            <Readout label="Member since" value={DATE_FORMAT.format(user.createdAt)} />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/[0.06] p-6">
+          <div className="flex flex-col gap-1.5">
+            <span className="font-mono-data text-[11px] tracking-[0.15em] text-destructive">
+              DANGER ZONE
+            </span>
+            <p className="text-sm text-[var(--muted)]">
+              Permanently delete your account, all jobs, clips, and files. This cannot be undone.
+            </p>
+          </div>
+          <div className="mt-4">
+            <DeleteAccountDialog />
+          </div>
+        </div>
       </div>
     </div>
   );
