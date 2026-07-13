@@ -35,8 +35,8 @@ _SENTENCE_ENDERS = (".", "!", "?", "…")
 # sentence finishes. These bound how far t0 may move back to a sentence start
 # and how far t1 may reach forward to a sentence end -- a far-off period can't
 # blow the window out (_clamp_duration is the backstop).
-_SENTENCE_LEADIN_MAX_S = 6.0
-_SENTENCE_TAIL_MAX_S = 8.0
+_SENTENCE_LEADIN_MAX_S = 10.0
+_SENTENCE_TAIL_MAX_S = 12.0
 
 TIE_BREAK_SCHEMA = {
     "required": ["choice"],
