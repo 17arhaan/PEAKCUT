@@ -17,7 +17,7 @@ test.describe("new job", () => {
 
     await page.goto("/dashboard/new");
     await page.getByLabel("YouTube URL").fill("https://youtube.com/watch?v=dQw4w9WgXcQ");
-    await page.getByRole("button", { name: "Create job" }).click();
+    await page.getByRole("button", { name: "Start processing" }).click();
 
     await expect(page).toHaveURL(/\/jobs\/[^/]+$/);
 
@@ -42,9 +42,9 @@ test.describe("new job", () => {
     await signIn(page, email);
 
     await page.goto("/dashboard/new");
-    await page.getByRole("button", { name: "Create job" }).click();
+    await page.getByRole("button", { name: "Start processing" }).click();
 
-    await expect(page.getByText(/Enter a YouTube URL or choose a file/)).toBeVisible();
+    await expect(page.getByText(/Paste a video link or drop a file/)).toBeVisible();
     await expect(page).toHaveURL(/\/dashboard\/new$/);
   });
 });

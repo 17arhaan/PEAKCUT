@@ -33,7 +33,7 @@ test.describe("happy path", () => {
     // New job via URL.
     await page.goto("/dashboard/new");
     await page.getByLabel("YouTube URL").fill("https://youtube.com/watch?v=dQw4w9WgXcQ");
-    await page.getByRole("button", { name: "Create job" }).click();
+    await page.getByRole("button", { name: "Start processing" }).click();
     await expect(page).toHaveURL(/\/jobs\/[^/]+$/);
     const jobId = page.url().split("/jobs/")[1];
 
