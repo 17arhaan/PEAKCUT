@@ -34,8 +34,27 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Peakcut",
+  metadataBase: new URL("https://peakcut.app"),
+  title: {
+    default: "Peakcut — long video in, clips with receipts out",
+    template: "%s · Peakcut",
+  },
   description: "Long video in. Viral clips out — with receipts.",
+  openGraph: {
+    title: "Peakcut — long video in, clips with receipts out",
+    description:
+      "An agent crew scores every moment against measured signals and ships each clip with the evidence behind its score.",
+    url: "/",
+    siteName: "Peakcut",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Peakcut" }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Peakcut — long video in, clips with receipts out",
+    description: "Every clip ships with its receipts.",
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({
