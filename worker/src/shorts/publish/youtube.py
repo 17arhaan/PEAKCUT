@@ -62,7 +62,10 @@ def publish_workdir_to_youtube(
 ) -> list[tuple[str, str]]:
     """Upload each kept clip that has a publish.json, in clip order. Uploads are
     UNLISTED unless `privacy` overrides (or the publish.json says otherwise).
-    Returns [(title, video_id)]. `limit` caps how many clips are uploaded."""
+    Clips with a youtube.json receipt (written after each successful upload)
+    are skipped, so re-running never uploads duplicates. Returns
+    [(title, video_id)] for the clips uploaded THIS run. `limit` caps how many
+    clips are uploaded."""
     out_dir = Path(out_dir)
     run = json.loads((out_dir / "run.json").read_text())
     creds = _credentials(Path(client_secret), Path(token))
@@ -80,10 +83,22 @@ def publish_workdir_to_youtube(
         pub = Path(mp4).parent / "publish.json"
         if not pub.exists():
             continue
+        # Idempotency: a completed upload writes youtube.json next to
+        # publish.json; a re-run (crash recovery, a later --limit pass) skips
+        # clips that already have a receipt instead of re-uploading dupes.
+        receipt = Path(mp4).parent / "youtube.json"
+        if receipt.exists():
+            continue
         meta = json.loads(pub.read_text())
         chosen = privacy or meta.get("privacyStatus") or "unlisted"
         if chosen not in _VALID_PRIVACY:
             chosen = "unlisted"
         video_id = _upload_one(youtube, Path(mp4), meta, chosen)
+        receipt.write_text(json.dumps({
+            "video_id": video_id,
+            "url": f"https://youtu.be/{video_id}",
+            "privacy": chosen,
+            "title": meta.get("title", "clip"),
+        }, indent=2))
         results.append((meta.get("title", "clip"), video_id))
     return results
