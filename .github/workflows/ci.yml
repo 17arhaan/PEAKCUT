@@ -16,9 +16,11 @@ on:
   workflow_dispatch:
 
 # A newer push supersedes an in-flight run of the same ref -- don't burn 2x
-# minutes finishing a run whose commit is already stale.
+# minutes finishing a run whose commit is already stale. Keyed by event too,
+# so a manual/nightly heavy run and a push-triggered fast run never cancel
+# each other (they share the ref but test different things).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 env:
