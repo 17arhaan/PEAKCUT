@@ -15,7 +15,7 @@ export default async function NewJobPage() {
   // this is the one dashboard screen meant to feel like the product's
   // signature "receipts" moment, not a data table.
   return (
-    <div className="landing flex flex-col items-center bg-[var(--ink)] px-6 py-12 font-body text-[var(--text)] sm:py-20">
+    <div className="landing relative flex min-h-full flex-1 flex-col items-center justify-center bg-[var(--ink)] px-6 py-12 font-body text-[var(--text)] sm:py-16">
       <div className="landing-grain" />
       <div className="relative z-10 flex w-full max-w-xl flex-col items-center gap-8 text-center">
         <div className="flex flex-col items-center gap-3">
