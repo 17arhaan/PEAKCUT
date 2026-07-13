@@ -120,7 +120,7 @@ export function NewJobForm({ userId, balance }: { userId: string; balance: numbe
       initial={reduceMotion ? undefined : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.45, ease: EASE_OUT }}
-      className="signal-glow relative w-full max-w-xl overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6 text-left sm:p-8"
+      className="signal-glow relative w-full overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6 text-left sm:p-8"
     >
       {/* Submit-in-flight cue: a signal-colored bar sweeps the top edge.
           Static (no loop) under prefers-reduced-motion. */}
