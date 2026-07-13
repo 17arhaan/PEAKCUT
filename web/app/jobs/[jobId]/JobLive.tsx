@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { ClipEvidence } from "@/app/jobs/[jobId]/ClipEvidence";
 import { PipelineLive } from "@/app/jobs/[jobId]/Pipeline";
 import { reRenderStyle } from "@/actions/jobs";
+import { humanizeStage } from "@/lib/job-events";
 import type { JobStatus, JobStatusClip } from "@/lib/job-status";
 import type { CaptionStyle } from "@/lib/worker";
 
@@ -75,8 +77,14 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
           </div>
           <JobStatusBadge status={data.status} />
         </div>
-      ) : (
+      ) : !hasClips ? (
         <PipelineLive data={data} />
+      ) : (
+        // clips already exist + still processing = a re-render (restyle) in flight
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)]/50 px-4 py-3">
+          <Loader2 className="size-4 animate-spin text-[var(--signal)]" aria-hidden />
+          <span className="text-sm text-[var(--text)]">{humanizeStage(data.stage)}</span>
+        </div>
       )}
 
       {hasClips ? (

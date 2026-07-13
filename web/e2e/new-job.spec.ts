@@ -26,9 +26,14 @@ test.describe("new job", () => {
     expect(job).toBeTruthy();
     expect(job.sourceType).toBe("url");
     expect(job.sourceUrl).toBe("https://youtube.com/watch?v=dQw4w9WgXcQ");
-    // STUB_WORKER=1 (see playwright.config.ts) flips status without
-    // spawning the real pipeline.
-    expect(job.status).toBe("processing");
+    // STUB_WORKER=1 flips status asynchronously after createJob returns, so the
+    // row read above may still be 'queued' the instant we query -- poll for it.
+    await expect
+      .poll(async () => {
+        const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+        return row.status;
+      })
+      .toBe("processing");
 
     // Real job-live page (W8), not the old placeholder -- STUB_WORKER's
     // status flip (processing/ingest/0) is visible via the humanized stage
