@@ -103,6 +103,25 @@ def main(argv: list[str] | None = None) -> None:
         "--from", dest="workdir", required=True, help="a prior `shorts run`'s output directory"
     )
 
+    yt_parser = subparsers.add_parser(
+        "publish-youtube",
+        help="upload each kept clip to YouTube Shorts (videos.insert; unlisted by default)",
+    )
+    yt_parser.add_argument(
+        "--from", dest="workdir", required=True, help="a prior `shorts run`'s output directory"
+    )
+    yt_parser.add_argument(
+        "--client-secret", required=True, help="path to the Desktop OAuth client_secret.json"
+    )
+    yt_parser.add_argument(
+        "--token", default=None, help="OAuth token cache path (default ~/.peakcut/yt-token.json)"
+    )
+    yt_parser.add_argument(
+        "--privacy", choices=["private", "unlisted", "public"], default=None,
+        help="privacy for the uploads (default: unlisted)",
+    )
+    yt_parser.add_argument("--limit", type=int, default=None, help="upload at most N clips")
+
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -127,6 +146,18 @@ def main(argv: list[str] | None = None) -> None:
 
         written = generate_youtube_metadata(Path(args.workdir))
         print(f"wrote {len(written)} publish.json file(s) under {args.workdir}")
+        sys.exit(0)
+    elif args.command == "publish-youtube":
+        from shorts.publish.youtube import DEFAULT_TOKEN, publish_workdir_to_youtube
+
+        token = Path(args.token) if args.token else DEFAULT_TOKEN
+        results = publish_workdir_to_youtube(
+            Path(args.workdir), Path(args.client_secret),
+            token=token, privacy=args.privacy, limit=args.limit,
+        )
+        for title, video_id in results:
+            print(f"uploaded {title!r} -> https://youtu.be/{video_id}")
+        print(f"{len(results)} clip(s) uploaded")
         sys.exit(0)
 
 
