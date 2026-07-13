@@ -30,6 +30,14 @@ _TIE_BREAK_AMBIGUITY_S = 2.0
 _MIN_DUR_S = 30.0
 _MAX_DUR_S = 90.0
 
+_SENTENCE_ENDERS = (".", "!", "?", "…")
+# A clip should open on a whole sentence and close only once the payoff's
+# sentence finishes. These bound how far t0 may move back to a sentence start
+# and how far t1 may reach forward to a sentence end -- a far-off period can't
+# blow the window out (_clamp_duration is the backstop).
+_SENTENCE_LEADIN_MAX_S = 6.0
+_SENTENCE_TAIL_MAX_S = 8.0
+
 TIE_BREAK_SCHEMA = {
     "required": ["choice"],
     "properties": {"choice": {"type": "number"}},
@@ -100,7 +108,48 @@ def _tie_break_t0(a: float, b: float, log: AgentLog) -> float:
     return a if abs(choice - a) <= abs(choice - b) else b
 
 
+def _ends_sentence(word) -> bool:
+    """True if this word closes a sentence -- its text ends in . ! ? or …
+    (allowing a trailing closing quote/bracket). Punctuation comes straight
+    from the transcript. # ponytail: an abbreviation like "Mr." reads as a
+    sentence end; rare in talking-head speech and self-corrects at the next
+    real boundary."""
+    return word.text.rstrip("\"'”’)]}").endswith(_SENTENCE_ENDERS)
+
+
+def _sentence_start_at_or_before(idx: SignalIndex, t: float) -> float | None:
+    """Start (t0) of the sentence `t` falls in -- the first word after the
+    nearest sentence-ending word that finishes at/before t. None if that start
+    is more than _SENTENCE_LEADIN_MAX_S before t (don't drag the open back into
+    unrelated content) or there's no boundary at all (e.g. no punctuation)."""
+    prior_ends = [w.t1 for w in idx.words if w.t1 <= t and _ends_sentence(w)]
+    if not prior_ends:
+        return None
+    last_end = max(prior_ends)
+    after = [w.t0 for w in idx.words if w.t0 >= last_end]
+    if not after:
+        return None
+    start = min(after)
+    return start if 0.0 <= t - start <= _SENTENCE_LEADIN_MAX_S else None
+
+
+def _sentence_end_at_or_after(idx: SignalIndex, t: float) -> float | None:
+    """End (t1) of the first sentence that finishes at/after `t`, so the payoff
+    sentence completes instead of being clipped. None if none ends within
+    _SENTENCE_TAIL_MAX_S past t (or no punctuation)."""
+    ends = [w.t1 for w in idx.words if w.t1 >= t and _ends_sentence(w)]
+    if not ends:
+        return None
+    end = min(ends)
+    return end if end - t <= _SENTENCE_TAIL_MAX_S else None
+
+
 def _snap_t0(cand: Candidate, idx: SignalIndex, log: AgentLog) -> float:
+    # Prefer opening on a whole sentence when one sits close to the raw t0.
+    sentence_target = _sentence_start_at_or_before(idx, cand.t0)
+    if sentence_target is not None:
+        return sentence_target
+
     silence_target = _silence_edge_before(idx, cand.t0)
     word_target = _word_start_at_or_before(idx, cand.t0)
 
@@ -143,21 +192,27 @@ def _strip_leading_fillers(t0: float, idx: SignalIndex) -> float:
 
 
 def _snap_t1(cand: Candidate, idx: SignalIndex) -> float:
-    """Nearest word END at or after the candidate's raw t1, plus up to 0.8s
-    of trailing room -- capped by the gap to the next word so the result
-    never runs into it."""
-    ending_at_or_after = [w for w in idx.words if w.t1 >= cand.t1]
-    if not ending_at_or_after:
-        return cand.t1  # nothing to snap to (t1 past every word) -- keep original
-    target = min(ending_at_or_after, key=lambda w: w.t1)
+    """End the clip on a completed sentence at/after the candidate's raw t1 so
+    the payoff isn't clipped mid-thought; failing that (no sentence ends nearby
+    -- e.g. no punctuation), fall back to the nearest word END at/after t1.
+    Either way, add up to 0.8s of trailing room, capped by the gap to the next
+    word so the result never runs into it."""
+    sentence_end = _sentence_end_at_or_after(idx, cand.t1)
+    if sentence_end is not None:
+        target_t1 = sentence_end
+    else:
+        ending_at_or_after = [w for w in idx.words if w.t1 >= cand.t1]
+        if not ending_at_or_after:
+            return cand.t1  # nothing to snap to (t1 past every word) -- keep original
+        target_t1 = min(ending_at_or_after, key=lambda w: w.t1).t1
 
-    # >= (not >): a word starting exactly at target.t1 (no gap between them
+    # >= (not >): a word starting exactly at target_t1 (no gap between them
     # at all) must still be found here, or the "next" word we'd find would
     # be the one after THAT -- overstating the gap and letting the trailing
     # room run straight into the immediately-following word.
-    later_starts = [w.t0 for w in idx.words if w.t0 >= target.t1]
-    gap = min(later_starts) - target.t1 if later_starts else _TRAILING_ROOM_MAX_S
-    return target.t1 + min(_TRAILING_ROOM_MAX_S, max(0.0, gap))
+    later_starts = [w.t0 for w in idx.words if w.t0 >= target_t1]
+    gap = min(later_starts) - target_t1 if later_starts else _TRAILING_ROOM_MAX_S
+    return target_t1 + min(_TRAILING_ROOM_MAX_S, max(0.0, gap))
 
 
 def _payoff_word_i(cand: Candidate, idx: SignalIndex) -> int | None:

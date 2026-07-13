@@ -217,6 +217,53 @@ def test_snap_t1_trailing_room_capped_by_next_word_gap_when_smaller():
     assert _snap_t1(cand, idx) == pytest.approx(10.7)
 
 
+# --- sentence-aware boundaries (punctuation-driven) ------------------------
+
+
+def test_snap_t1_extends_to_the_end_of_the_payoff_sentence():
+    """A raw t1 landing mid-sentence extends to the end of that sentence
+    (word ending in .!?), so the payoff isn't clipped."""
+    idx = _mk_index(words=[
+        Word(text="Here's", t0=10.0, t1=10.3, conf=0.9),
+        Word(text="the", t0=10.3, t1=10.5, conf=0.9),
+        Word(text="setup.", t0=10.5, t1=11.0, conf=0.9),
+        Word(text="And", t0=11.2, t1=11.4, conf=0.9),
+        Word(text="the", t0=11.4, t1=11.6, conf=0.9),
+        Word(text="punchline!", t0=11.6, t1=12.4, conf=0.9),
+        Word(text="Next", t0=13.4, t1=13.7, conf=0.9),
+    ])
+    cand = Candidate(t0=10.0, t1=11.5, source="test", evidence=[])  # raw t1 mid-sentence
+    t1 = _snap_t1(cand, idx)
+    assert t1 >= 12.4  # reached the end of "punchline!"
+    assert t1 <= 13.4  # didn't run into the next sentence
+
+
+def test_snap_t0_opens_on_the_sentence_start(tmp_path):
+    """A raw t0 landing mid-sentence moves back to that sentence's first word."""
+    idx = _mk_index(words=[
+        Word(text="Earlier.", t0=5.0, t1=5.6, conf=0.9),
+        Word(text="So", t0=7.0, t1=7.2, conf=0.9),
+        Word(text="anyway,", t0=7.2, t1=7.6, conf=0.9),
+        Word(text="the", t0=7.6, t1=7.8, conf=0.9),
+        Word(text="story", t0=7.8, t1=8.2, conf=0.9),
+    ])
+    cand = Candidate(t0=7.7, t1=40.0, source="test", evidence=[])  # raw t0 mid-sentence
+    assert _snap_t0(cand, idx, _log(tmp_path)) == pytest.approx(7.0)
+
+
+def test_snap_t1_falls_back_when_no_sentence_ends_within_reach():
+    """No sentence-ending punctuation near the raw t1 -> keep the old word-end
+    behavior instead of reaching arbitrarily far."""
+    idx = _mk_index(words=[
+        Word(text="one", t0=10.0, t1=10.4, conf=0.9),
+        Word(text="two", t0=10.4, t1=10.8, conf=0.9),
+        Word(text="three", t0=30.0, t1=30.5, conf=0.9),  # only period-free words
+    ])
+    cand = Candidate(t0=5.0, t1=10.5, source="test", evidence=[])
+    # word-end fallback: nearest end >=10.5 is "two"(10.8) + 0.8 trailing = 11.6
+    assert _snap_t1(cand, idx) == pytest.approx(11.6)
+
+
 # --- payoff_word_i ---------------------------------------------------------
 
 
