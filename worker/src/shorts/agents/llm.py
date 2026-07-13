@@ -15,6 +15,23 @@ from shorts.agent_log import AgentLog
 
 DEFAULT_MODEL = "claude-sonnet-5"
 
+# Per-agent default models. The Critic is the crew's volume caller (every
+# candidate x up to MAX_ROUNDS) and its honesty comes from the evidence gate
+# (claims must resolve against the SignalIndex or the component is voided),
+# not from model size -- so it runs a much cheaper model by default. Scout /
+# Hook Writer / Copywriter stay on DEFAULT_MODEL: they generate, not verify.
+# Resolution order: SHORTS_LLM_MODEL_<AGENT> > SHORTS_LLM_MODEL > this map
+# > DEFAULT_MODEL.
+AGENT_DEFAULT_MODELS = {"critic": "claude-haiku-4-5"}
+
+
+def _model_for(agent: str) -> str:
+    return (
+        os.environ.get(f"SHORTS_LLM_MODEL_{agent.upper()}")
+        or os.environ.get("SHORTS_LLM_MODEL")
+        or AGENT_DEFAULT_MODELS.get(agent, DEFAULT_MODEL)
+    )
+
 # ponytail: hand-rolled required-keys/type check rather than a jsonschema
 # dependency -- the schemas this gate needs are a small, flat subset (top-
 # level "required" + "properties" with primitive/array/object "type").
@@ -85,7 +102,7 @@ def complete_json(prompt: str, schema: dict, agent: str, log: AgentLog) -> dict:
     if os.environ.get("SHORTS_LLM", "stub") != "live":
         raise StubModeError(f"SHORTS_LLM != live -- {agent} must use its deterministic path")
 
-    model = os.environ.get("SHORTS_LLM_MODEL", DEFAULT_MODEL)
+    model = _model_for(agent)
     client = anthropic.Anthropic()
 
     last_error = "unknown error"

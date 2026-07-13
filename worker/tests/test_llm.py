@@ -206,6 +206,21 @@ def test_agent_log_totals_arithmetic(tmp_path):
     assert totals["critic"]["cost_cents"] == pytest.approx(150.0)  # 0.5M @ $3/1M = $1.50
 
 
+def test_agent_log_totals_price_by_model(tmp_path):
+    """Records carrying a model in their payload are priced at THAT model's
+    rate -- the haiku-defaulted Critic must not be billed at sonnet prices."""
+    log = AgentLog(tmp_path / "log.jsonl")
+    log.emit("critic", "llm_complete", {"model": "claude-haiku-4-5"}, tokens_in=1_000_000, tokens_out=1_000_000)
+    log.emit("scout", "llm_complete", {"model": "claude-sonnet-5"}, tokens_in=1_000_000, tokens_out=1_000_000)
+
+    totals = log.totals()
+
+    # 1M in @ $1/1M + 1M out @ $5/1M = $6 = 600 cents
+    assert totals["critic"]["cost_cents"] == pytest.approx(600.0)
+    # 1M in @ $3/1M + 1M out @ $15/1M = $18 = 1800 cents
+    assert totals["scout"]["cost_cents"] == pytest.approx(1800.0)
+
+
 def test_agent_log_totals_empty_when_no_file(tmp_path):
     log = AgentLog(tmp_path / "does_not_exist.jsonl")
     assert log.totals() == {}

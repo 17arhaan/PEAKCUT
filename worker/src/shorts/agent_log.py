@@ -7,12 +7,23 @@ import threading
 from pathlib import Path
 
 # ponytail: pricing constants -- update these when Anthropic pricing
-# changes. Current claude-sonnet-5 pricing (see claude-api skill /
-# platform.claude.com/docs/en/pricing): $3.00 per 1M input tokens, $15.00
-# per 1M output tokens (list price; a $2/$10 introductory rate applies
-# through 2026-08-31, not modeled here -- swap these if/when it matters).
-PRICE_CENTS_PER_INPUT_TOKEN = 3.0 * 100 / 1_000_000  # $3/1M tokens -> cents/token
-PRICE_CENTS_PER_OUTPUT_TOKEN = 15.0 * 100 / 1_000_000  # $15/1M tokens -> cents/token
+# changes (platform.claude.com/docs/en/pricing). (input, output) cents per
+# token. Priced per record off the payload's "model" (llm.py logs it on
+# every llm_complete); records without a model fall back to sonnet list
+# price, which keeps older logs' totals meaningful.
+_PRICING_CENTS_PER_TOKEN = {
+    "claude-sonnet-5": (3.0 * 100 / 1_000_000, 15.0 * 100 / 1_000_000),  # $3 / $15 per 1M
+    "claude-haiku-4-5": (1.0 * 100 / 1_000_000, 5.0 * 100 / 1_000_000),  # $1 / $5 per 1M
+}
+_DEFAULT_PRICING = _PRICING_CENTS_PER_TOKEN["claude-sonnet-5"]
+
+
+def _pricing_for(model: str | None) -> tuple[float, float]:
+    if model:
+        for prefix, pricing in _PRICING_CENTS_PER_TOKEN.items():
+            if model.startswith(prefix):
+                return pricing
+    return _DEFAULT_PRICING
 
 
 class AgentLog:
@@ -58,8 +69,9 @@ class AgentLog:
             )
             entry["tokens_in"] += record.get("tokens_in", 0)
             entry["tokens_out"] += record.get("tokens_out", 0)
-            entry["cost_cents"] = (
-                entry["tokens_in"] * PRICE_CENTS_PER_INPUT_TOKEN
-                + entry["tokens_out"] * PRICE_CENTS_PER_OUTPUT_TOKEN
+            in_price, out_price = _pricing_for(record.get("payload", {}).get("model"))
+            entry["cost_cents"] += (
+                record.get("tokens_in", 0) * in_price
+                + record.get("tokens_out", 0) * out_price
             )
         return totals
