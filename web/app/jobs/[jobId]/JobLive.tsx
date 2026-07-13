@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { ClipEvidence } from "@/app/jobs/[jobId]/ClipEvidence";
+import { PipelineLive } from "@/app/jobs/[jobId]/Pipeline";
 import { reRenderStyle } from "@/actions/jobs";
-import { humanizeEvent, humanizeStage } from "@/lib/job-events";
 import type { JobStatus, JobStatusClip } from "@/lib/job-status";
 import type { CaptionStyle } from "@/lib/worker";
 
@@ -51,16 +50,10 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
     };
   }, [jobId, data.status]);
 
-  const progressPct = Math.round(data.progress * 100);
   const hasClips = data.clips.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Job</h1>
-        <JobStatusBadge status={data.status} />
-      </div>
-
       {data.status === "failed" ? (
         <Card className="border border-destructive/40 bg-destructive/10">
           <CardHeader>
@@ -70,33 +63,21 @@ export function JobLive({ jobId, initialData }: { jobId: string; initialData: Jo
             {data.error ?? "Something went wrong."}
           </CardContent>
         </Card>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-muted-foreground">{humanizeStage(data.stage)}</p>
-          <Progress value={progressPct} />
+      ) : data.status === "done" ? (
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="font-mono-data text-[11px] tracking-[0.15em] text-[var(--signal)]">
+              DONE
+            </span>
+            <h1 className="font-display text-2xl font-extrabold tracking-tight">
+              Your clips are ready.
+            </h1>
+          </div>
+          <JobStatusBadge status={data.status} />
         </div>
+      ) : (
+        <PipelineLive data={data} />
       )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Activity</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-          {data.events.length === 0 ? (
-            <p>Waiting for the crew to get started…</p>
-          ) : (
-            data.events.map((event, i) => (
-              <p key={`${event.agent}-${event.created_at}-${i}`}>
-                {humanizeEvent(event.agent, event.action, event.payload)}
-              </p>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      {!hasClips && data.status !== "done" && data.status !== "failed" ? (
-        <p className="text-sm text-muted-foreground">Working on your clips…</p>
-      ) : null}
 
       {hasClips ? (
         <StyleSelector
