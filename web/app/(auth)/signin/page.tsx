@@ -38,7 +38,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
       <div className="w-full max-w-sm">
         <Link href="/" aria-label="Peakcut" className="mb-8 flex items-center justify-center">
           <Image
-            src="/peakcut-wordmark.png"
+            src="/peakcut-logo.png"
             alt="Peakcut"
             width={1481}
             height={267}

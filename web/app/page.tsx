@@ -19,7 +19,7 @@ export default function Home() {
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
           <Link href="/" aria-label="Peakcut" className="flex items-center">
             <Image
-              src="/peakcut-wordmark.png"
+              src="/peakcut-logo.png"
               alt="Peakcut"
               width={1481}
               height={267}
@@ -67,11 +67,11 @@ export default function Home() {
           <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
             <div className="flex max-w-xs flex-col gap-3">
               <Image
-                src="/peakcut-wordmark.png"
+                src="/peakcut-logo.png"
                 alt="Peakcut"
                 width={1481}
                 height={267}
-                className="h-6 w-auto self-start opacity-90"
+                className="h-6 w-auto self-start"
               />
               <p className="text-sm text-[var(--muted)]">
                 An agent crew scores every moment against measured signals — and
