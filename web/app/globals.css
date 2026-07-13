@@ -252,6 +252,32 @@
   }
 }
 
+/* Loading skeletons — a quiet left-to-right sheen over a panel-tinted block,
+   used by the route loading.tsx files so a data fetch shows structure, not a
+   blank flash. Static under reduced-motion. */
+@keyframes skeleton-sheen {
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  border-radius: 0.5rem;
+  background-color: var(--panel, #141925);
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in oklab, var(--line, #232a3a) 70%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sheen 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 /* Soft amber glow utility for key elements (CTA, score badge, highlighted
    pricing card). Kept as a static shadow, not animated — the glow itself is
    the accent, no need to also move it. */
