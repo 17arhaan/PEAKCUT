@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Button } from "@/components/ui/button";
 import { AmbientTrace } from "./_components/landing/ambient-trace";
+import { SiteHeader } from "./_components/landing/site-header";
 import { HeroSection } from "./_components/landing/hero-section";
 import { TrustStrip } from "./_components/landing/trust-strip";
 import { Features } from "./_components/landing/features";
@@ -15,35 +15,7 @@ export default function Home() {
     <div className="landing flex flex-1 flex-col bg-[var(--ink)] font-body text-[var(--text)]">
       <div className="landing-grain" />
 
-      <header className="relative z-10 border-b border-[var(--line)]">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
-          <Link href="/" aria-label="Peakcut" className="flex items-center">
-            <Image
-              src="/peakcut-logo.png"
-              alt="Peakcut"
-              width={1481}
-              height={267}
-              priority
-              className="h-6 w-auto"
-            />
-          </Link>
-          <nav className="hidden items-center gap-6 font-mono-data text-xs text-[var(--muted)] sm:flex">
-            <a href="#how-it-works" className="transition-colors hover:text-[var(--text)]">
-              How it works
-            </a>
-            <a href="#pricing" className="transition-colors hover:text-[var(--text)]">
-              Pricing
-            </a>
-          </nav>
-          <Button
-            size="sm"
-            render={<Link href="/signin" />}
-            className="border border-[var(--line)] bg-transparent text-[var(--text)] hover:bg-[var(--panel)]"
-          >
-            Sign in
-          </Button>
-        </div>
-      </header>
+      <SiteHeader />
 
       <main className="relative z-10 flex-1">
         <HeroSection />
