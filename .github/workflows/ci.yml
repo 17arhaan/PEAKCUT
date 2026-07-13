@@ -8,7 +8,9 @@ on:
 jobs:
   worker-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The suite includes real-render + model-download integration tests that
+    # run slower in CI than locally (~27m); give headroom so it doesn't cancel.
+    timeout-minutes: 55
     env:
       SHORTS_WHISPER_MODEL: tiny
       SHORTS_LLM: stub
