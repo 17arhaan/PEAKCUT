@@ -1,67 +1,127 @@
 # Going Live — Deployment Guide
 
-The app is fully built and runs locally. Going public = creating a few hosted
-accounts and pasting their credentials. This guide is the exact checklist.
+Two deployables: the **web app** (Vercel) and the **worker** (Modal). They meet
+at the worker seam (`web/lib/worker.ts`) — with `MODAL_TOKEN_*` set the web app
+dispatches jobs to Modal; unset, it runs the pipeline as a local subprocess.
 
-The worker (video pipeline) is ALREADY deployed on Modal. This guide is about
-putting the **web app** on the internet and pointing it at hosted services
-instead of your laptop.
+> Local dev needs none of this: `docker compose up -d db` + `npm run dev` runs
+> the whole product with a stub worker and dev sign-in. See `web/SETUP.md`.
 
 ---
 
-## What you create (accounts — all have free tiers)
+## Accounts to create (all have free tiers)
 
-Do these in order. Each row lists exactly what value I need back from you.
+Do these in order. Each row lists exactly what value the deploy needs back.
 
-| # | Account | Free? | What to create | Value(s) I need |
+| # | Account | Free? | What to create | Value(s) needed |
 |---|---------|-------|----------------|-----------------|
 | 1 | **Neon** (neon.tech) | Yes | A project → a Postgres database | The **pooled connection string** (`postgresql://...-pooler...`) |
 | 2 | **Cloudflare R2** (dash.cloudflare.com → R2) | Yes (10GB) | A bucket named `shorts-factory` + an API token | Account ID, Access Key ID, Secret Access Key, bucket name |
-| 3 | **Vercel** (vercel.com) | Yes | Connect your GitHub `shorts-factory` repo | Just sign in with GitHub — I do the rest via `vercel` CLI or you click "Import" |
-| 4 | **Google Cloud** (console.cloud.google.com) | Yes | OAuth 2.0 credentials (later — for real logins) | Client ID + Client Secret |
-| 5 | **Dodo Payments** (dodopayments.com) | Yes | Merchant account (last — for charging money) | API key + webhook secret |
+| 3 | **Modal** (modal.com) | Yes ($30/mo credit) | `modal token new` on the deploy machine | Token ID + secret |
+| 4 | **Vercel** (vercel.com) | Yes | Connect the GitHub `PEAKCUT` repo | Sign in with GitHub — the rest is CLI or "Import" |
+| 5 | **Google Cloud** (console.cloud.google.com) | Yes | OAuth 2.0 credentials (for real logins) | Client ID + Client Secret |
+| 6 | **Dodo Payments** (dodopayments.com) | Yes | Merchant account (last — for charging money) | API key + webhook secret |
 
-**You can launch with just 1–3.** Google OAuth (4) and Dodo (5) layer on after —
-the app works with dev-login and no billing until then.
-
----
-
-## The sequence (what happens after you create accounts)
-
-### Phase A — core deploy (accounts 1–3) → public URL, working product
-1. You give me the Neon connection string + R2 credentials.
-2. I set them as Vercel environment variables (`AUTH_SECRET`, `DATABASE_URL`,
-   R2 vars, `MODAL_TRIGGER_URL`, `CRON_SECRET`, `BILLING_WEBHOOK_SECRET`,
-   `ANTHROPIC_API_KEY`, and the Modal secret is already set worker-side).
-3. I run the swap-in tasks: `R2Storage` (replaces LocalStorage), `ModalWorker`
-   (replaces the local subprocess — triggers the deployed Modal pipeline),
-   Neon driver (`neon-http` instead of node-postgres), and push the DB schema
-   to Neon.
-4. `vercel deploy --prod` → you get a real URL.
-5. Landing-page placeholder pricing → your real numbers.
-   **Result: strangers can sign up (dev-login or magic-link), upload, get clips, download.**
-
-### Phase B — real logins (account 4)
-6. Wire Google OAuth + Resend magic-link (the Auth.js providers are already
-   env-gated — just add the credentials). Turn OFF `AUTH_DEV`.
-
-### Phase C — payments (account 5)
-7. Dodo checkout links on the pricing page + point the webhook at
-   `/api/webhooks/billing` (the handler is built + idempotent). Now you charge.
+**Launch needs only 1–4.** Google OAuth (5) and Dodo (6) layer on after — the
+app works with dev-login and no billing until then.
 
 ---
 
-## Housekeeping (independent of accounts)
-- **Rotate the Anthropic API key** (it was pasted in a chat transcript):
-  regenerate at console.anthropic.com → I re-store it in the gitignored env
-  files + Modal secret.
-- **Grant CI push**: `gh auth refresh -h github.com -s workflow` → I push the
-  two parked CI workflows (worker + web) so tests run on every commit.
-- **Merge** `build/worker-pipeline → main` when you're ready to make it canonical.
+## 1. Database (Neon)
 
----
+The schema lives in `web/lib/db/schema.ts` and is synced with drizzle-kit. The
+repo has no committed SQL migrations — dev syncs directly with `push`:
+
+```bash
+cd web
+DATABASE_URL=<neon-pooled-url> npx drizzle-kit push   # sync schema to the DB
+```
+
+Fine for the first deploy against an empty DB. Before real traffic, switch to
+versioned migrations — `drizzle-kit generate` writes SQL into `./drizzle`,
+commit it, then `drizzle-kit migrate` on deploy — so schema changes replay
+deterministically instead of being diffed against live tables.
+
+## 2. Worker (Modal)
+
+The pipeline is one Modal function (`worker/src/shorts/modal_app.py`, app
+`shorts-factory`).
+
+```bash
+cd worker
+modal secret create anthropic ANTHROPIC_API_KEY=<key>   # once
+modal deploy src/shorts/modal_app.py                    # deploy / redeploy
+modal run src/shorts/modal_app.py --source <url>        # smoke-test one run
+```
+
+Live crew vs stub is controlled by `SHORTS_LLM` inside the function (see the
+header comment in `modal_app.py`). Model selection: `SHORTS_LLM_MODEL_<AGENT>`
+> `SHORTS_LLM_MODEL` > per-agent defaults (Critic runs `claude-haiku-4-5`,
+everything else `claude-sonnet-5`).
+
+## 3. Web (Vercel)
+
+Set env vars in the Vercel project (Production scope), then deploy. Keys mirror
+`web/.env.example`:
+
+| Var | Required | Notes |
+|-----|----------|-------|
+| `DATABASE_URL` | ✅ | Neon pooled connection string. |
+| `AUTH_SECRET` | ✅ | `openssl rand -base64 32`. |
+| `AUTH_DEV` | — | **Must be unset in prod** — `1` enables passwordless login. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | ✅ (prod auth) | Real sign-in once the dev provider is off. |
+| `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | ✅ (real jobs) | Unset → local-subprocess worker. |
+| `R2_*` | ✅ (clip storage) | Object storage for rendered clips; unset → local disk. |
+| `DODO_API_KEY` / `DODO_WEBHOOK_SECRET` | — | Billing; unset → credits are manual. |
+| `CRON_SECRET` | — | Bearer token for the stuck-job sweeper (`app/api/cron/sweep`). |
+
+```bash
+cd web
+vercel --prod        # or push to the connected branch
+```
+
+After deploy, sanity-check: sign in works, `/dashboard/new` submits a job, and
+the job reaches `render`/`done`.
+
+### Remaining swap-in tasks (code, not accounts)
+- `R2Storage` replaces `LocalStorage` (the `Storage` seam in `web/lib`).
+- `ModalWorker` replaces `LocalWorker` (the `Worker` seam in `web/lib/worker.ts`).
+- Neon driver (`drizzle-orm/neon-http`) replaces node-postgres in
+  `web/lib/db/index.ts` (marked with a `ponytail:` comment).
+
+## Phases
+
+- **Phase A — core deploy (accounts 1–4)** → public URL, working product:
+  strangers can sign up (dev-login), upload, get clips, download.
+- **Phase B — real logins (account 5)** → wire Google OAuth, turn OFF `AUTH_DEV`.
+- **Phase C — payments (account 6)** → Dodo checkout links on pricing + webhook
+  at `/api/webhooks/billing` (handler is built + idempotent).
+
+## Rollback
+
+- **Web** — Vercel dashboard → previous deployment → *Promote to Production*.
+- **Worker** — `modal deploy` the previous commit; in-flight jobs finish on the
+  old container.
+- **DB** — schema syncs are forward-only; snapshot before a destructive change.
+
+## CI/CD
+
+GitHub Actions run on every push to `main`: `web-ci` (build + vitest +
+Playwright e2e, ~3 min) and worker `CI` (fast suite ~8 min per push; the heavy
+integration suite runs nightly + on `workflow_dispatch`). Wire Vercel's Git
+integration for web auto-deploys and gate on green CI.
+
+## Housekeeping before real users
+
+- **Rotate the Anthropic API key** (it was pasted in a chat transcript once):
+  regenerate at console.anthropic.com, re-store in the gitignored env files +
+  the Modal secret.
+- **Google OAuth app verification** — the OAuth consent screen is in "testing"
+  (100-user cap, 7-day token expiry) until verified.
 
 ## Cost reality at launch
-- Modal: pay-per-second GPU/CPU; ~$0.12–0.50 of LLM + compute per video (measured).
+
+- Modal: pay-per-second GPU/CPU; ~$0.12–0.50 of LLM + compute per video
+  (measured; the Haiku-defaulted Critic cut the LLM share ~8x).
 - Neon/R2/Vercel free tiers cover early usage.
 - You net positive as soon as you charge more than per-video cost.

@@ -32,8 +32,9 @@ Every stage is **checkpointed** (`signals.json` → `scored.json` → `cuts.json
 ```
 worker/   Python pipeline — signal extraction, agent crew, render, publish. Runs locally or on Modal (GPU).
 web/      Next.js 16 app — landing, auth, dashboard, link/upload job submission, live job view, owner admin cockpit.
-docs/     Design + build notes.
-DEPLOY.md Go-live checklist (Vercel / Neon / R2 / Modal).
+docs/     Design + build notes — start with docs/ARCHITECTURE.md.
+DEPLOY.md Go-live runbook (Vercel / Neon / R2 / Modal).
+clients/  API clients — a Java 17 SDK + CLI (clients/java).
 ```
 
 ---

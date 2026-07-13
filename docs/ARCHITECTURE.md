@@ -20,7 +20,7 @@ repo/
 ├── worker/     Python — the pipeline (signals, agent crew, render, publish). Runs locally or on Modal (GPU).
 ├── web/        TypeScript / Next.js 16 — landing, auth, dashboard, job submission, live view, admin, billing.
 ├── clients/    Java SDK + CLI for the API.
-└── docs/       This file, plus DEPLOY.md.
+└── docs/       This file. (DEPLOY.md, the go-live runbook, lives at the repo root.)
 ```
 
 The split is deliberate: the *work* is ML/media (Python's ecosystem), the
