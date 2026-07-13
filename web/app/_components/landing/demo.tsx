@@ -45,9 +45,18 @@ export function Demo() {
           variants={reduceMotion ? undefined : container}
         >
           <motion.div variants={reduceMotion ? undefined : fadeUp} className="mx-auto w-full max-w-[220px]">
-            <div className="signal-glow relative aspect-9/16 overflow-hidden rounded-xl border border-[var(--line)] bg-gradient-to-b from-[var(--pulse)]/30 via-[var(--panel)] to-[var(--ink)]">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(245,179,1,0.2),transparent_45%),radial-gradient(circle_at_70%_60%,rgba(124,92,255,0.28),transparent_55%)]" />
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(0,0,0,0.55)_100%)]" />
+            <div className="signal-glow relative aspect-9/16 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--ink)]">
+              <video
+                aria-hidden
+                className="absolute inset-0 h-full w-full object-cover"
+                src="/hero-clip.mp4"
+                poster="/hero-clip-poster.jpg"
+                autoPlay
+                muted
+                loop
+                playsInline
+              />
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_58%,rgba(0,0,0,0.5)_100%)]" />
               <span className="signal-glow absolute top-2 right-2 flex flex-col items-center rounded-full bg-[var(--signal)] px-2.5 py-1.5 text-[var(--ink)]">
                 <span className="font-display text-lg leading-none font-extrabold tabular-nums">
                   {score}
@@ -56,9 +65,6 @@ export function Demo() {
                   SCORE
                 </span>
               </span>
-              <p className="absolute inset-x-2 bottom-2 line-clamp-2 rounded bg-black/40 px-1.5 py-1 text-[11px] leading-tight font-semibold text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
-                {DEMO_CLIP.caption}
-              </p>
             </div>
           </motion.div>
 
