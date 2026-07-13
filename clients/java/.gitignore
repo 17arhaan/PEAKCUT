@@ -1,0 +1,4 @@
+# Maven build output
+target/
+# maven-shade-plugin artifact
+dependency-reduced-pom.xml
