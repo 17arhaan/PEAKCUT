@@ -91,6 +91,43 @@ def _loudnorm_filter(measured: dict) -> str:
     )
 
 
+_LUFS_TRIM_DEADBAND_DB = 0.5  # within this of target: close enough, don't churn
+_LUFS_TRIM_MAX_DB = 3.0  # a bigger miss means something else is wrong; let QA judge
+_EBUR128_I_RE = re.compile(r"I:\s*(-?[\d.]+) LUFS")
+
+
+def _output_lufs(mp4: Path) -> float | None:
+    """Integrated loudness of the rendered output via ebur128 (None when the
+    Summary is missing or reads -inf -- silent clip, QA's LUFS gate handles it)."""
+    proc = subprocess.run(
+        ["ffmpeg", "-i", str(mp4), "-af", "ebur128", "-f", "null", "-"],
+        capture_output=True, check=False,
+    )
+    stderr = proc.stderr.decode("utf-8", errors="replace")
+    match = _EBUR128_I_RE.search(stderr.rsplit("Summary:", 1)[-1])
+    return float(match.group(1)) if match else None
+
+
+def _trim_output_loudness(out: Path) -> None:
+    """Post-normalization loudness trim. Linear loudnorm applies ONE fixed gain
+    predicted from the source cut's measurement, and on a short clip the
+    rendered output can land just outside QA's -14+-1 gate (a real run dropped
+    a good clip at -15.1). The render-routed repair re-renders the identical
+    filter and reproduces the identical miss -- so correct it here instead:
+    measure the actual output and, if it's off by more than the deadband but
+    within a small corrective range, re-gain the audio only (video
+    stream-copied, so this pass is cheap)."""
+    measured = _output_lufs(out)
+    if measured is None:
+        return
+    gain = _LOUDNESS_TARGET_LUFS - measured
+    if abs(gain) <= _LUFS_TRIM_DEADBAND_DB or abs(gain) > _LUFS_TRIM_MAX_DB:
+        return
+    tmp = out.with_name(out.stem + ".lufs-trim.mp4")
+    run(["-y", "-i", str(out), "-c:v", "copy", "-af", f"volume={gain:.2f}dB", "-c:a", "aac", str(tmp)])
+    tmp.replace(out)
+
+
 def render_clip(
     video: Path,
     cut: Cut,
@@ -155,6 +192,7 @@ def render_clip(
                 out.name,
             ]
         )
+        _trim_output_loudness(out)
         run(
             [
                 "-y",

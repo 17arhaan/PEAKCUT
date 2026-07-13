@@ -12,7 +12,7 @@ import subprocess
 
 from conftest import fixture
 from shorts.ffmpeg import probe
-from shorts.render.renderer import _reframe_fc, render_clip
+from shorts.render.renderer import _reframe_fc, _trim_output_loudness, render_clip
 from shorts.types import (
     Curve,
     Cut,
@@ -143,3 +143,26 @@ def test_render_clip_loudness_is_normalized_to_minus_14_lufs(tmp_path):
 
     lufs = _lufs(mp4)
     assert -15.0 <= lufs <= -13.0, f"measured {lufs} LUFS, want -14 +/- 1"
+
+
+def test_trim_output_loudness_recovers_a_near_miss(tmp_path):
+    """The post-render loudness trim: a rendered clip knocked outside QA's
+    -14+-1 gate (the real-run failure was -15.1 LUFS) is pulled back onto
+    target by the audio-only re-gain pass -- video untouched."""
+    video = fixture("real_talking_head.mp4")
+    info = probe(video)
+    idx = _mk_index(media=info, words=[Word(text="hi", t0=5.1, t1=5.3, conf=0.9)])
+    cut = Cut(t0=5.0, t1=13.0)
+    mp4, _thumb = render_clip(video, cut, idx, None, "s1", tmp_path / "clip_001")
+
+    off = tmp_path / "off.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(mp4), "-c:v", "copy", "-af", "volume=-2dB", "-c:a", "aac", str(off)],
+        capture_output=True, check=True,
+    )
+    assert _lufs(off) < -15.0  # confirmed off-target before the trim
+
+    _trim_output_loudness(off)
+
+    lufs = _lufs(off)
+    assert -14.8 <= lufs <= -13.2, f"measured {lufs} LUFS after trim, want ~-14"
