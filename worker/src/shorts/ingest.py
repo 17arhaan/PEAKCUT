@@ -126,6 +126,13 @@ def _download_url(url: str, workdir: Path) -> Path:
     args = [
         "yt-dlp",
         "--no-warnings",
+        # Network resilience: a "[SSL] record layer failure" on googlevideo is
+        # almost always a bad IPv6 path, so pin IPv4; bound socket hangs and
+        # keep retrying fragments so a momentary TLS drop doesn't fail the job.
+        "--force-ipv4",
+        "--socket-timeout", "30",
+        "--retries", "10",
+        "--fragment-retries", "10",
         "-f", YT_DLP_FORMAT,
         "--merge-output-format", "mp4",
         "-o", out_template,
