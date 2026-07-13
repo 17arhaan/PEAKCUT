@@ -15,6 +15,10 @@ import { formatRelativeTime } from "@/lib/utils";
 import { Reveal, StatsGrid, type StatConfig } from "./_components/animated";
 
 const RECENT_NOTE = "capped at 25, newest first";
+// shared instrument-panel table skin
+const TABLE_WRAP = "overflow-hidden rounded-xl border bg-card/50";
+const TH = "font-mono-data text-[10px] tracking-[0.12em] uppercase";
+const TR = "transition-colors hover:bg-card";
 
 function centsToDollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -86,12 +90,15 @@ export default async function AdminPage() {
     <div className="dark admin-cockpit min-h-full flex-1 bg-background font-body text-foreground">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
         <Reveal>
-          <div className="flex items-center gap-2.5">
+          <span className="font-mono-data text-[11px] tracking-[0.15em] text-primary">
+            COCKPIT
+          </span>
+          <div className="mt-1 flex items-center gap-2.5">
             <span
               aria-hidden
-              className="size-2 shrink-0 rounded-full bg-[var(--primary)] motion-safe:animate-pulse"
+              className="size-2 shrink-0 rounded-full bg-primary motion-safe:animate-pulse"
             />
-            <h1 className="font-display text-xl font-extrabold tracking-tight">Admin</h1>
+            <h1 className="font-display text-2xl font-extrabold tracking-tight">Admin</h1>
           </div>
           <p className="mt-1 font-mono-data text-xs text-muted-foreground">
             Cross-user monitoring cockpit — read-only. Visible only to {session?.user?.email}.
@@ -107,37 +114,39 @@ export default async function AdminPage() {
             <h2 className="font-display text-sm font-bold">
               Recent jobs <span className="font-mono-data font-normal text-muted-foreground">({RECENT_NOTE})</span>
             </h2>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Cost</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentJobs.map((job) => (
-                  // No link to /jobs/[id]: that route's owner-guard 404s a job
-                  // that isn't the viewer's, and admins aren't an exception to
-                  // it (see lib/job-status.ts). Rather than widen that
-                  // ownership check's trust boundary for this read-only
-                  // cockpit, this row is data-only — see web-admin-report.md.
-                  <TableRow key={job.id}>
-                    <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
-                    <TableCell>{jobSource(job)}</TableCell>
-                    <TableCell>
-                      <JobStatusBadge status={job.status} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{job.durationMin != null ? `${job.durationMin.toFixed(1)} min` : "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{job.costCents != null ? centsToDollars(job.costCents) : "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
+            <div className={TABLE_WRAP}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className={TH}>User</TableHead>
+                    <TableHead className={TH}>Source</TableHead>
+                    <TableHead className={TH}>Status</TableHead>
+                    <TableHead className={TH}>Duration</TableHead>
+                    <TableHead className={TH}>Cost</TableHead>
+                    <TableHead className={TH}>Created</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {recentJobs.map((job) => (
+                    // No link to /jobs/[id]: that route's owner-guard 404s a job
+                    // that isn't the viewer's, and admins aren't an exception to
+                    // it (see lib/job-status.ts). Rather than widen that
+                    // ownership check's trust boundary for this read-only
+                    // cockpit, this row is data-only — see web-admin-report.md.
+                    <TableRow key={job.id} className={TR}>
+                      <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
+                      <TableCell>{jobSource(job)}</TableCell>
+                      <TableCell>
+                        <JobStatusBadge status={job.status} />
+                      </TableCell>
+                      <TableCell className="font-mono-data tabular-nums text-muted-foreground">{job.durationMin != null ? `${job.durationMin.toFixed(1)} min` : "—"}</TableCell>
+                      <TableCell className="font-mono-data tabular-nums text-muted-foreground">{job.costCents != null ? centsToDollars(job.costCents) : "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </section>
         </Reveal>
 
@@ -146,26 +155,28 @@ export default async function AdminPage() {
             <h2 className="font-display text-sm font-bold">
               Recent signups <span className="font-mono-data font-normal text-muted-foreground">({RECENT_NOTE})</span>
             </h2>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Plan</TableHead>
-                  <TableHead>Balance</TableHead>
-                  <TableHead>Joined</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentSignups.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell>{u.email}</TableCell>
-                    <TableCell className="text-muted-foreground">{u.plan}</TableCell>
-                    <TableCell className="text-muted-foreground">{u.minutesBalance} min</TableCell>
-                    <TableCell className="text-muted-foreground">{formatRelativeTime(u.createdAt)}</TableCell>
+            <div className={TABLE_WRAP}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className={TH}>Email</TableHead>
+                    <TableHead className={TH}>Plan</TableHead>
+                    <TableHead className={TH}>Balance</TableHead>
+                    <TableHead className={TH}>Joined</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {recentSignups.map((u) => (
+                    <TableRow key={u.id} className={TR}>
+                      <TableCell>{u.email}</TableCell>
+                      <TableCell className="text-muted-foreground">{u.plan}</TableCell>
+                      <TableCell className="font-mono-data tabular-nums text-muted-foreground">{u.minutesBalance} min</TableCell>
+                      <TableCell className="text-muted-foreground">{formatRelativeTime(u.createdAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </section>
         </Reveal>
 
@@ -174,26 +185,28 @@ export default async function AdminPage() {
             <h2 className="font-display text-sm font-bold">
               Recent failures <span className="font-mono-data font-normal text-muted-foreground">({RECENT_NOTE})</span>
             </h2>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Error</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentFailures.map((job) => (
-                  <TableRow key={job.id}>
-                    <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
-                    <TableCell>{jobSource(job)}</TableCell>
-                    <TableCell className="text-destructive">{job.error ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
+            <div className={TABLE_WRAP}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className={TH}>User</TableHead>
+                    <TableHead className={TH}>Source</TableHead>
+                    <TableHead className={TH}>Error</TableHead>
+                    <TableHead className={TH}>Created</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {recentFailures.map((job) => (
+                    <TableRow key={job.id} className={TR}>
+                      <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
+                      <TableCell>{jobSource(job)}</TableCell>
+                      <TableCell className="text-destructive">{job.error ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </section>
         </Reveal>
       </div>
