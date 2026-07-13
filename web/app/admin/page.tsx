@@ -9,24 +9,12 @@ import {
   type AdminFailureRow,
   type AdminJobRow,
 } from "@/lib/admin-data";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JobStatusBadge } from "@/components/job-status-badge";
 import { formatRelativeTime } from "@/lib/utils";
+import { Reveal, StatsGrid, type StatConfig } from "./_components/animated";
 
 const RECENT_NOTE = "capped at 25, newest first";
-
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Card className="gap-1 py-4">
-      <CardHeader className="gap-0 px-4">
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-2xl">{value}</CardTitle>
-        {sub && <CardDescription>{sub}</CardDescription>}
-      </CardHeader>
-    </Card>
-  );
-}
 
 function centsToDollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -54,120 +42,161 @@ export default async function AdminPage() {
     getRecentFailures(),
   ]);
 
+  const stats: StatConfig[] = [
+    { key: "users", label: "Total users", value: overview.totalUsers, sub: `+${overview.signupsLast7Days} last 7d` },
+    {
+      key: "jobs",
+      label: "Total jobs",
+      value: overview.totalJobs,
+      sub: `${overview.jobsByStatus.queued} queued · ${overview.jobsByStatus.processing} processing · ${overview.jobsByStatus.done} done · ${overview.jobsByStatus.failed} failed`,
+    },
+    {
+      key: "videos",
+      label: "Videos processed",
+      value: overview.totalVideosProcessed,
+      sub: `${overview.totalClips} clips produced`,
+    },
+    {
+      key: "cost",
+      label: "Compute/LLM cost",
+      value: overview.totalCostCents / 100,
+      decimals: 2,
+      prefix: "$",
+      sub: `${centsToDollars(overview.costCentsLast7Days)} last 7d`,
+    },
+    {
+      key: "credits",
+      label: "Credits outstanding",
+      value: overview.creditsOutstandingMinutes,
+      suffix: " min",
+      sub: `${overview.minutesGranted} granted · ${overview.minutesSpent} spent`,
+    },
+    {
+      key: "revenue",
+      label: "Revenue",
+      value: overview.revenueCents / 100,
+      decimals: 2,
+      prefix: "$",
+      sub: `${overview.payingUsers} paying users`,
+      glow: true,
+    },
+  ];
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Admin</h1>
-        <p className="text-sm text-muted-foreground">
-          Cross-user monitoring cockpit — read-only. Visible only to {session?.user?.email}.
-        </p>
+    <div className="dark admin-cockpit min-h-full flex-1 bg-background font-body text-foreground">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+        <Reveal>
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-full bg-[var(--primary)] motion-safe:animate-pulse"
+            />
+            <h1 className="font-display text-xl font-extrabold tracking-tight">Admin</h1>
+          </div>
+          <p className="mt-1 font-mono-data text-xs text-muted-foreground">
+            Cross-user monitoring cockpit — read-only. Visible only to {session?.user?.email}.
+          </p>
+        </Reveal>
+
+        <StatsGrid stats={stats} />
+
+        {/* admin actions (grant credits, delete user) — future */}
+
+        <Reveal>
+          <section className="flex flex-col gap-2">
+            <h2 className="font-display text-sm font-bold">
+              Recent jobs <span className="font-mono-data font-normal text-muted-foreground">({RECENT_NOTE})</span>
+            </h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Cost</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentJobs.map((job) => (
+                  // No link to /jobs/[id]: that route's owner-guard 404s a job
+                  // that isn't the viewer's, and admins aren't an exception to
+                  // it (see lib/job-status.ts). Rather than widen that
+                  // ownership check's trust boundary for this read-only
+                  // cockpit, this row is data-only — see web-admin-report.md.
+                  <TableRow key={job.id}>
+                    <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
+                    <TableCell>{jobSource(job)}</TableCell>
+                    <TableCell>
+                      <JobStatusBadge status={job.status} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{job.durationMin != null ? `${job.durationMin.toFixed(1)} min` : "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{job.costCents != null ? centsToDollars(job.costCents) : "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </section>
+        </Reveal>
+
+        <Reveal>
+          <section className="flex flex-col gap-2">
+            <h2 className="font-display text-sm font-bold">
+              Recent signups <span className="font-mono-data font-normal text-muted-foreground">({RECENT_NOTE})</span>
+            </h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Plan</TableHead>
+                  <TableHead>Balance</TableHead>
+                  <TableHead>Joined</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentSignups.map((u) => (
+                  <TableRow key={u.id}>
+                    <TableCell>{u.email}</TableCell>
+                    <TableCell className="text-muted-foreground">{u.plan}</TableCell>
+                    <TableCell className="text-muted-foreground">{u.minutesBalance} min</TableCell>
+                    <TableCell className="text-muted-foreground">{formatRelativeTime(u.createdAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </section>
+        </Reveal>
+
+        <Reveal>
+          <section className="flex flex-col gap-2">
+            <h2 className="font-display text-sm font-bold">
+              Recent failures <span className="font-mono-data font-normal text-muted-foreground">({RECENT_NOTE})</span>
+            </h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Error</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentFailures.map((job) => (
+                  <TableRow key={job.id}>
+                    <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
+                    <TableCell>{jobSource(job)}</TableCell>
+                    <TableCell className="text-destructive">{job.error ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </section>
+        </Reveal>
       </div>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-        <StatCard label="Total users" value={String(overview.totalUsers)} sub={`+${overview.signupsLast7Days} last 7d`} />
-        <StatCard
-          label="Total jobs"
-          value={String(overview.totalJobs)}
-          sub={`${overview.jobsByStatus.queued} queued · ${overview.jobsByStatus.processing} processing · ${overview.jobsByStatus.done} done · ${overview.jobsByStatus.failed} failed`}
-        />
-        <StatCard label="Videos processed" value={String(overview.totalVideosProcessed)} sub={`${overview.totalClips} clips produced`} />
-        <StatCard
-          label="Compute/LLM cost"
-          value={centsToDollars(overview.totalCostCents)}
-          sub={`${centsToDollars(overview.costCentsLast7Days)} last 7d`}
-        />
-        <StatCard
-          label="Credits outstanding"
-          value={`${overview.creditsOutstandingMinutes} min`}
-          sub={`${overview.minutesGranted} granted · ${overview.minutesSpent} spent`}
-        />
-        <StatCard label="Revenue" value={centsToDollars(overview.revenueCents)} sub={`${overview.payingUsers} paying users`} />
-      </div>
-
-      {/* admin actions (grant credits, delete user) — future */}
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Recent jobs <span className="font-normal text-muted-foreground">({RECENT_NOTE})</span></h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Duration</TableHead>
-              <TableHead>Cost</TableHead>
-              <TableHead>Created</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {recentJobs.map((job) => (
-              // No link to /jobs/[id]: that route's owner-guard 404s a job
-              // that isn't the viewer's, and admins aren't an exception to
-              // it (see lib/job-status.ts). Rather than widen that
-              // ownership check's trust boundary for this read-only
-              // cockpit, this row is data-only — see web-admin-report.md.
-              <TableRow key={job.id}>
-                <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
-                <TableCell>{jobSource(job)}</TableCell>
-                <TableCell>
-                  <JobStatusBadge status={job.status} />
-                </TableCell>
-                <TableCell className="text-muted-foreground">{job.durationMin != null ? `${job.durationMin.toFixed(1)} min` : "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{job.costCents != null ? centsToDollars(job.costCents) : "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Recent signups <span className="font-normal text-muted-foreground">({RECENT_NOTE})</span></h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Email</TableHead>
-              <TableHead>Plan</TableHead>
-              <TableHead>Balance</TableHead>
-              <TableHead>Joined</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {recentSignups.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell>{u.email}</TableCell>
-                <TableCell className="text-muted-foreground">{u.plan}</TableCell>
-                <TableCell className="text-muted-foreground">{u.minutesBalance} min</TableCell>
-                <TableCell className="text-muted-foreground">{formatRelativeTime(u.createdAt)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Recent failures <span className="font-normal text-muted-foreground">({RECENT_NOTE})</span></h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Error</TableHead>
-              <TableHead>Created</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {recentFailures.map((job) => (
-              <TableRow key={job.id}>
-                <TableCell className="text-muted-foreground">{job.userEmail}</TableCell>
-                <TableCell>{jobSource(job)}</TableCell>
-                <TableCell className="text-destructive">{job.error ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{formatRelativeTime(job.createdAt)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
     </div>
   );
 }

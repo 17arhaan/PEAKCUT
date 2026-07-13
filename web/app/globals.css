@@ -337,3 +337,22 @@
     animation: none;
   }
 }
+
+/* Admin dashboard cockpit skin. Paired with the .dark class (which already
+   gives every shadcn primitive — Card, Table, Badge, Button — correct
+   light-on-dark contrast, so none of them need per-component edits) this
+   only retints the structural colors toward the landing page's exact ink
+   palette (#0b0e14 / #141925 / #232a3a) and amber primary/ring, so the
+   owner-only cockpit and the marketing page read as one product. Scoped to
+   the admin route only — the rest of the app keeps the default light theme. */
+.admin-cockpit {
+  --background: #0b0e14;
+  --card: #141925;
+  --popover: #141925;
+  --border: #232a3a;
+  --input: #232a3a;
+  --primary: #f5b301;
+  --primary-foreground: #0b0e14;
+  --ring: #f5b301;
+  --muted-foreground: #8a93a6;
+}
