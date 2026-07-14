@@ -32,6 +32,12 @@ _DICT_CHARS = set(_BUNDLE.get_dict().keys()) - {"-", "*"}
 
 _PUNCT_RE = re.compile(r"[^a-z']")
 
+# Forced alignment runs per-window (see align_words): bounds the trellis so
+# long sources can't overflow the kernel, and keeps each wav2vec2 forward
+# small. Pad absorbs whisper timestamp drift at the window edges.
+_ALIGN_WINDOW_S = 60.0
+_ALIGN_PAD_S = 1.0
+
 
 def _components():
     global _MODEL, _TOKENIZER, _ALIGNER
@@ -72,26 +78,54 @@ def align_words(wav: Path, words: list[Word], language: str) -> list[Word]:
         return words
 
     y, sr = librosa.load(str(wav), sr=_BUNDLE.sample_rate, mono=True)
-    waveform = torch.from_numpy(y).unsqueeze(0)
-
-    with torch.inference_mode():
-        emission, _lengths = model(waveform)
-
-    transcript = [normalized[i] for i in alignable_idx]
-    tokens = tokenizer(transcript)
-    token_spans = aligner(emission[0], tokens)
-
-    # seconds spanned by one emission frame
-    seconds_per_frame = waveform.size(1) / emission.size(1) / sr
-
     out = list(words)
-    for spans, i in zip(token_spans, alignable_idx):
-        if not spans:
+
+    # Align in bounded windows, not the whole file at once. forced_align's
+    # trellis is (emission frames x transcript tokens); on a long video that
+    # product overflows the kernel's int32 indexing and SEGFAULTS (observed
+    # on a ~35-min source: SIGSEGV inside forced_align_impl -- the 90s test
+    # fixtures never got near the limit). Windows also keep the wav2vec2
+    # forward's O(T^2) attention cheap. Words are grouped by their whisper
+    # timestamps; each window is aligned independently against its own audio
+    # slice and the aligned times are offset back by the slice start.
+    start = 0
+    while start < len(alignable_idx):
+        # grow the window until it spans ~_ALIGN_WINDOW_S of source time
+        end = start + 1
+        window_t0 = words[alignable_idx[start]].t0
+        while (
+            end < len(alignable_idx)
+            and words[alignable_idx[end]].t1 - window_t0 <= _ALIGN_WINDOW_S
+        ):
+            end += 1
+        batch = alignable_idx[start:end]
+        start = end
+
+        slice_t0 = max(0.0, words[batch[0]].t0 - _ALIGN_PAD_S)
+        slice_t1 = words[batch[-1]].t1 + _ALIGN_PAD_S
+        s0 = int(slice_t0 * sr)
+        s1 = min(len(y), int(slice_t1 * sr))
+        if s1 <= s0:
             continue
-        aligned_t0 = spans[0].start * seconds_per_frame
-        aligned_t1 = spans[-1].end * seconds_per_frame
-        aligned_mid_ms = (aligned_t0 + aligned_t1) / 2 * 1000
-        whisper_mid_ms = (words[i].t0 + words[i].t1) / 2 * 1000
-        out[i] = replace(words[i], align_err_ms=abs(whisper_mid_ms - aligned_mid_ms))
+        waveform = torch.from_numpy(y[s0:s1]).unsqueeze(0)
+
+        with torch.inference_mode():
+            emission, _lengths = model(waveform)
+
+        transcript = [normalized[i] for i in batch]
+        tokens = tokenizer(transcript)
+        token_spans = aligner(emission[0], tokens)
+
+        # seconds spanned by one emission frame (of THIS slice)
+        seconds_per_frame = waveform.size(1) / emission.size(1) / sr
+
+        for spans, i in zip(token_spans, batch):
+            if not spans:
+                continue
+            aligned_t0 = slice_t0 + spans[0].start * seconds_per_frame
+            aligned_t1 = slice_t0 + spans[-1].end * seconds_per_frame
+            aligned_mid_ms = (aligned_t0 + aligned_t1) / 2 * 1000
+            whisper_mid_ms = (words[i].t0 + words[i].t1) / 2 * 1000
+            out[i] = replace(words[i], align_err_ms=abs(whisper_mid_ms - aligned_mid_ms))
 
     return out
