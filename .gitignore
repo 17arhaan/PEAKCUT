@@ -16,3 +16,7 @@ graphify-out/
 
 # Claude Code agent worktrees / local session scratch -- never committed.
 .claude/
+
+# Generated media library (brand assets + clip gallery) -- see studio/README.md
+studio/*
+!studio/README.md

@@ -122,6 +122,20 @@ def main(argv: list[str] | None = None) -> None:
     )
     yt_parser.add_argument("--limit", type=int, default=None, help="upload at most N clips")
 
+    export_parser = subparsers.add_parser(
+        "export",
+        help="copy kept clips into studio/gallery as <date>_<name>/NN_Hook_Title.mp4",
+    )
+    export_parser.add_argument(
+        "--from", dest="workdir", required=True, help="a prior `shorts run`'s output directory"
+    )
+    export_parser.add_argument(
+        "--name", required=True, help="gallery folder slug, e.g. the-office-pranks"
+    )
+    export_parser.add_argument(
+        "--dest", default=None, help="gallery root (default: <repo>/studio/gallery)"
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -158,6 +172,12 @@ def main(argv: list[str] | None = None) -> None:
         for title, video_id in results:
             print(f"uploaded {title!r} -> https://youtu.be/{video_id}")
         print(f"{len(results)} clip(s) uploaded")
+        sys.exit(0)
+    elif args.command == "export":
+        from shorts.export import DEFAULT_GALLERY, export_run
+
+        dest = Path(args.dest) if args.dest else DEFAULT_GALLERY
+        export_run(Path(args.workdir), args.name, dest)
         sys.exit(0)
 
 
