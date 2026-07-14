@@ -4,7 +4,7 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { jobs } from "@/lib/db/schema";
+import { jobs, users } from "@/lib/db/schema";
 import { assertOwnedKey } from "@/lib/storage";
 import { worker, type CaptionStyle } from "@/lib/worker";
 import { debit, InsufficientCreditsError, refund } from "@/lib/credits";
@@ -60,6 +60,14 @@ export async function createJob(input: CreateJobInput): Promise<{ jobId: string 
   const userId = session?.user?.id;
   if (!userId) {
     throw new Error("unauthorized");
+  }
+
+  // A JWT can outlive its user row (account deleted, dev DB recreated).
+  // Without this, the ledger debit below dies on a raw FK violation that
+  // surfaces as "Failed query: insert into credit_ledger ...".
+  const [userRow] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId));
+  if (!userRow) {
+    throw new Error("Your session is stale — sign out and back in, then retry.");
   }
 
   const { source, sourceType } = input;

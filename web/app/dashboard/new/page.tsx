@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { getUserBalance } from "@/lib/data";
+import { getUserProfile } from "@/lib/data";
 import { NewJobForm } from "./new-job-form";
 import { JobPreview } from "./JobPreview";
 
@@ -9,7 +9,12 @@ export default async function NewJobPage() {
   const userId = session?.user?.id;
   if (!userId) redirect("/signin");
 
-  const balance = await getUserBalance(userId);
+  // Session cookie can outlive the user row (account deleted, dev DB
+  // recreated) -- same guard as /settings. Without it this page renders with
+  // a 0 balance and createJob dies on a raw FK violation.
+  const user = await getUserProfile(userId);
+  if (!user) redirect("/signin");
+  const balance = user.minutesBalance;
 
   // Reuses the landing page's instrument-panel theme (app/globals.css'
   // `.landing` scope) -- this is the product's signature "receipts" moment,

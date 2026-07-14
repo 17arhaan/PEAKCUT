@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Plus, Sparkles } from "lucide-react";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
-import { getJobsForUser, getUserBalance } from "@/lib/data";
+import { getJobsForUser, getUserProfile } from "@/lib/data";
 import type { jobs as jobsTable } from "@/lib/db/schema";
 import { JobsList, type JobRow } from "./_components/jobs-list";
 
@@ -27,7 +27,10 @@ export default async function DashboardPage() {
   const userId = session?.user?.id;
   if (!userId) redirect("/signin");
 
-  const [userJobs, balance] = await Promise.all([getJobsForUser(userId), getUserBalance(userId)]);
+  // Stale-session guard (cookie outlived the user row) -- same as /settings.
+  const [userJobs, user] = await Promise.all([getJobsForUser(userId), getUserProfile(userId)]);
+  if (!user) redirect("/signin");
+  const balance = user.minutesBalance;
 
   const rows: JobRow[] = userJobs.map((job) => ({
     id: job.id,
