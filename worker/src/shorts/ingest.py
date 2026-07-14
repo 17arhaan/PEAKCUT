@@ -126,13 +126,18 @@ def _download_url(url: str, workdir: Path) -> Path:
     args = [
         "yt-dlp",
         "--no-warnings",
-        # Network resilience: a "[SSL] record layer failure" on googlevideo is
-        # almost always a bad IPv6 path, so pin IPv4; bound socket hangs and
-        # keep retrying fragments so a momentary TLS drop doesn't fail the job.
+        # Network resilience: googlevideo kills long-lived video-stream
+        # connections mid-transfer ("[SSL] record layer failure") on some
+        # networks. --http-chunk-size splits the download into short ranged
+        # requests so a killed connection costs one chunk, and retries RESUME
+        # from the last byte -- reproduced+verified 2026-07-14: unchunked
+        # burned every retry at random offsets; 10M chunks completed the same
+        # 106MB stream. IPv4 pin + socket timeout bound the hangs.
         "--force-ipv4",
         "--socket-timeout", "30",
-        "--retries", "10",
-        "--fragment-retries", "10",
+        "--http-chunk-size", "10M",
+        "--retries", "15",
+        "--fragment-retries", "15",
         "-f", YT_DLP_FORMAT,
         "--merge-output-format", "mp4",
         "-o", out_template,
