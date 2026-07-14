@@ -57,6 +57,6 @@ API keys, no network.
 ## Modal
 
 ```bash
-modal deploy src/shorts/modal_app.py           # deploy the pipeline (app: shorts-factory)
+modal deploy src/shorts/modal_app.py           # deploy the pipeline (app: peakcut)
 modal run src/shorts/modal_app.py --source …   # one-off remote run
 ```

@@ -16,7 +16,7 @@ Do these in order. Each row lists exactly what value the deploy needs back.
 | # | Account | Free? | What to create | Value(s) needed |
 |---|---------|-------|----------------|-----------------|
 | 1 | **Neon** (neon.tech) | Yes | A project → a Postgres database | The **pooled connection string** (`postgresql://...-pooler...`) |
-| 2 | **Cloudflare R2** (dash.cloudflare.com → R2) | Yes (10GB) | A bucket named `shorts-factory` + an API token | Account ID, Access Key ID, Secret Access Key, bucket name |
+| 2 | **Cloudflare R2** (dash.cloudflare.com → R2) | Yes (10GB) | A bucket named `peakcut` + an API token | Account ID, Access Key ID, Secret Access Key, bucket name |
 | 3 | **Modal** (modal.com) | Yes ($30/mo credit) | `modal token new` on the deploy machine | Token ID + secret |
 | 4 | **Vercel** (vercel.com) | Yes | Connect the GitHub `PEAKCUT` repo | Sign in with GitHub — the rest is CLI or "Import" |
 | 5 | **Google Cloud** (console.cloud.google.com) | Yes | OAuth 2.0 credentials (for real logins) | Client ID + Client Secret |
@@ -45,7 +45,7 @@ deterministically instead of being diffed against live tables.
 ## 2. Worker (Modal)
 
 The pipeline is one Modal function (`worker/src/shorts/modal_app.py`, app
-`shorts-factory`).
+`peakcut`).
 
 ```bash
 cd worker

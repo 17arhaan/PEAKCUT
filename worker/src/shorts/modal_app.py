@@ -99,7 +99,7 @@ WORKER_DIR = _THIS_FILE.parents[2] if len(_THIS_FILE.parents) > 2 else _THIS_FIL
 CACHE_DIR = "/cache"  # whisper weights (HF_HOME) -- T9 spike's proven volume
 DATA_DIR = "/data"  # pipeline checkpoint workdirs (media/signals/scored/cuts/clips)
 
-app = modal.App("shorts-factory")
+app = modal.App("peakcut")
 
 whisper_cache = modal.Volume.from_name("shorts-whisper-cache", create_if_missing=True)
 pipeline_data = modal.Volume.from_name("shorts-pipeline-data", create_if_missing=True)

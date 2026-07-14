@@ -94,8 +94,8 @@
       "repairs": [],
       "dropped_reason": null,
       "paths": {
-        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_001/clip.mp4",
-        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_001/thumb.jpg"
+        "mp4": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_001/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_001/thumb.jpg"
       }
     },
     {
@@ -172,8 +172,8 @@
       ],
       "dropped_reason": "BLACK",
       "paths": {
-        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_002/clip.mp4",
-        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_002/thumb.jpg"
+        "mp4": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_002/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_002/thumb.jpg"
       }
     },
     {
@@ -236,8 +236,8 @@
       ],
       "dropped_reason": null,
       "paths": {
-        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_003/clip.mp4",
-        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_003/thumb.jpg"
+        "mp4": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_003/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_003/thumb.jpg"
       }
     },
     {
@@ -300,8 +300,8 @@
       ],
       "dropped_reason": null,
       "paths": {
-        "mp4": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_004/clip.mp4",
-        "thumb": "/Users/arhaangirdhar/Desktop/shorts-factory-demo/real_talking_head/clip_004/thumb.jpg"
+        "mp4": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_004/clip.mp4",
+        "thumb": "/Users/arhaangirdhar/Coding/shorts-factory/studio/gallery/2026-07-12_fixture-demos/real_talking_head/clip_004/thumb.jpg"
       }
     }
   ]

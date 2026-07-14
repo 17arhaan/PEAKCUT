@@ -5,17 +5,17 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: shorts_factory
+      POSTGRES_DB: peakcut
     ports:
       - "5432:5432"
     volumes:
-      - shorts_factory_pgdata:/var/lib/postgresql/data
+      - peakcut_pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d shorts_factory"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d peakcut"]
       interval: 2s
       timeout: 3s
       retries: 20
 
 volumes:
-  shorts_factory_pgdata:
+  peakcut_pgdata:

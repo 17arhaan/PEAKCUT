@@ -1,7 +1,7 @@
 [project]
 name = "shorts"
 version = "0.1.0"
-description = "Shorts Factory worker pipeline"
+description = "Peakcut worker pipeline"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.116.0",
