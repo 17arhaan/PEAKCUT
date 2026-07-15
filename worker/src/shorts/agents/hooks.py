@@ -14,7 +14,7 @@ transcript.
 import string
 
 from shorts.agent_log import AgentLog
-from shorts.agents.llm import StubModeError, complete_json
+from shorts.agents.llm import LlmError, StubModeError, complete_json
 from shorts.qa import SAFE_AREA_MAX_CHARS as _SAFE_AREA_MAX_CHARS
 from shorts.signals.index import words_in
 from shorts.types import Cut, Hook, SignalIndex
@@ -186,6 +186,11 @@ def write(cut: Cut, idx: SignalIndex, log: AgentLog) -> Hook:
     try:
         return _live_write(cut, idx, log)
     except StubModeError:
+        return _fallback(cut, idx)
+    except LlmError as e:
+        # one malformed model reply must not kill the run -- the
+        # transcript-derived fallback hook ships instead
+        log.emit("hooks", "degraded_to_fallback", {"reason": str(e)[:300]})
         return _fallback(cut, idx)
 
 

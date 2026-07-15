@@ -15,7 +15,7 @@ own evidence count instead (see _stub_score).
 
 from shorts.agent_log import AgentLog
 from shorts.agents.evidence import validate_claims
-from shorts.agents.llm import StubModeError, complete_json
+from shorts.agents.llm import LlmError, StubModeError, complete_json
 from shorts.agents.scout import _CLAIM_VOCABULARY, _parse_evidence
 from shorts.signals.index import words_in
 from shorts.types import Candidate, Claim, Scored, SignalIndex, Span
@@ -182,8 +182,20 @@ def score(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Scored:
     """Score `cand` on the four components. LIVE mode (SHORTS_LLM=live)
     asks the LLM; STUB mode (the default, no API key needed) never calls
     out -- `complete_json` raises StubModeError immediately and this falls
-    back to the deterministic evidence-count formula."""
+    back to the deterministic evidence-count formula.
+
+    An LlmError (the model never produced schema-valid JSON, even after the
+    re-ask + retry) degrades to the SAME deterministic formula for THIS
+    candidate instead of propagating -- one malformed response must never
+    kill the whole run (observed live: a single bad critic reply aborted an
+    entire pipeline). The degradation is logged for the audit trail."""
     try:
         return _live_score(cand, idx, log)
     except StubModeError:
+        return _stub_score(cand, log)
+    except LlmError as e:
+        log.emit(
+            "critic", "degraded_to_stub",
+            {"t0": cand.t0, "t1": cand.t1, "reason": str(e)[:300]},
+        )
         return _stub_score(cand, log)

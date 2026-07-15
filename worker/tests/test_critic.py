@@ -306,3 +306,29 @@ def test_best_effort_fallback_when_scout_finds_nothing(tmp_path):
     records = _records(log)
     fallback_records = [r for r in records if r["action"] == "best_effort_fallback"]
     assert len(fallback_records) == len(result)
+
+
+def test_llm_error_degrades_to_stub_score_instead_of_raising(tmp_path, monkeypatch):
+    """A model that never returns schema-valid JSON (LlmError after re-ask +
+    retry) must degrade THIS candidate to the deterministic formula, not
+    abort the run -- observed live: one malformed critic reply killed an
+    entire pipeline."""
+    from shorts.agents.llm import LlmError
+
+    def boom(*_args, **_kwargs):
+        raise LlmError("critic: no schema-valid JSON after retry: invalid JSON")
+
+    monkeypatch.setenv("SHORTS_LLM", "live")
+    monkeypatch.setattr(critic, "complete_json", boom)
+    log = AgentLog(tmp_path / "log.jsonl")
+    cand = Candidate(
+        t0=10.0, t1=45.0, source="rule",
+        evidence=[Claim(kind="energy_peak", t=12.0, value=2.0)] * 4,
+    )
+
+    scored = critic_score(cand, _mk_index(), log)
+
+    assert scored.verdict in ("keep", "kill", "borderline")  # a real verdict, no crash
+    assert scored.total == 60  # stub formula: 15 * 4 evidence
+    raw = (tmp_path / "log.jsonl").read_text()
+    assert "degraded_to_stub" in raw

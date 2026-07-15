@@ -18,7 +18,7 @@ import statistics
 
 from shorts.agent_log import AgentLog
 from shorts.agents.evidence import validate_claims
-from shorts.agents.llm import StubModeError, complete_json
+from shorts.agents.llm import LlmError, StubModeError, complete_json
 from shorts.signals.index import events_in, peaks_in
 from shorts.types import Candidate, Claim, SignalIndex, Span
 
@@ -383,6 +383,10 @@ def candidates(idx: SignalIndex, log: AgentLog, note: str = "") -> list[Candidat
         llm = _llm_candidates(idx, log, note)
     except StubModeError:
         log.emit("scout", "llm_pass_skipped", {"reason": "stub mode -- heuristic only"})
+        return heuristic
+    except LlmError as e:
+        # degrade to heuristics rather than aborting the run
+        log.emit("scout", "llm_pass_skipped", {"reason": f"llm error: {str(e)[:250]}"})
         return heuristic
 
     combined = _dedupe(heuristic + llm)
