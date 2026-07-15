@@ -10,6 +10,9 @@ process.env.AUTH_SECRET ??= "test-secret";
 process.env.AUTH_DEV ??= "1";
 process.env.BILLING_WEBHOOK_SECRET ??= "test-billing-secret";
 process.env.CRON_SECRET ??= "test-cron-secret";
+// Parallel test files share one DB; LocalWorker's global processing-count
+// gate (lib/worker.ts) would queue spawns nondeterministically at 1.
+process.env.LOCAL_WORKER_CONCURRENCY ??= "1000";
 
 // Ensure test DB exists and schema is deployed (fallback for existing containers).
 // ponytail: one-shot create-and-push; idempotent so safe to run per test suite

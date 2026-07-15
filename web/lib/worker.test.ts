@@ -176,3 +176,62 @@ describe("LocalWorker crash-path refund (no run.json / spawn error)", () => {
     expect(await balance(userId)).toBe(balanceAfterDebit + ESTIMATE_MINUTES);
   });
 });
+
+describe("LocalWorker concurrency gate", () => {
+  let outDir: string;
+  let userId: string;
+  let processingJobId: string;
+  let queuedJobId: string;
+
+  beforeEach(async () => {
+    outDir = await mkdtemp(path.join(tmpdir(), "worker-gate-test-"));
+    spawnMock.mockReset();
+    spawnMock.mockImplementation(() => makeFakeChild().child);
+
+    userId = crypto.randomUUID();
+    processingJobId = crypto.randomUUID();
+    queuedJobId = crypto.randomUUID();
+    await db.insert(users).values({ id: userId, email: `worker-gate-${userId}@example.com`, minutesBalance: 100 });
+    await db.insert(jobs).values([
+      {
+        id: processingJobId,
+        userId,
+        sourceType: "url",
+        sourceUrl: "https://youtube.com/watch?v=busy",
+        status: "processing",
+      },
+      {
+        id: queuedJobId,
+        userId,
+        sourceType: "url",
+        sourceUrl: "https://youtube.com/watch?v=waiting",
+        status: "queued",
+      },
+    ]);
+  });
+
+  afterEach(async () => {
+    // delete rows FIRST so the background slot-waiter (5s poll) sees the job
+    // gone and exits instead of spawning after the test ends
+    await db.delete(jobs).where(eq(jobs.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+    await rm(outDir, { recursive: true, force: true });
+    process.env.LOCAL_WORKER_CONCURRENCY = "1000";
+  });
+
+  it("holds a second job at 'queued' (no spawn) while another is processing", async () => {
+    process.env.LOCAL_WORKER_CONCURRENCY = "1";
+    const worker = new LocalWorker();
+
+    await worker.start({
+      id: queuedJobId,
+      source: "https://youtube.com/watch?v=waiting",
+      sourceType: "url",
+      outDir,
+    });
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    const [row] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, queuedJobId));
+    expect(row.status).toBe("queued");
+  });
+});

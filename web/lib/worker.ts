@@ -223,8 +223,52 @@ async function refundOnCrash(jobId: string): Promise<void> {
   }
 }
 
+// One pipeline at a time on a laptop: whisper + ffmpeg saturate the machine,
+// so a second simultaneous job doubles both runtimes instead of overlapping.
+// ModalWorker has no such limit (each job is its own container).
+// LOCAL_WORKER_CONCURRENCY overrides; read at call time so vitest can flip it
+// per-test (and its setup raises it globally -- parallel test files share one
+// DB, where a global processing-count gate at 1 would flake).
+function maxConcurrentLocalJobs(): number {
+  return Number(process.env.LOCAL_WORKER_CONCURRENCY ?? 1);
+}
+const QUEUE_POLL_MS = 5000;
+
+async function countProcessingJobs(): Promise<number> {
+  const rows = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.status, "processing"));
+  return rows.length;
+}
+
 export class LocalWorker implements Worker {
   async start(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void> {
+    // ponytail: check-then-spawn has a submit-same-instant race and the
+    // in-process waiter dies with a dev-server restart (the stuck-job
+    // sweeper refunds orphans) -- fine for LocalWorker's single-user dev
+    // reality; a DB-locked queue if this ever fronts real traffic.
+    if ((await countProcessingJobs()) >= maxConcurrentLocalJobs()) {
+      // stays 'queued' (createJob's insert state); promote when a slot frees
+      void this.waitForSlot(job).catch((err) => {
+        console.error(`[job ${job.id}] queue waiter error:`, err);
+      });
+      return;
+    }
+    await this.launch(job);
+  }
+
+  private async waitForSlot(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void> {
+    for (;;) {
+      await sleep(QUEUE_POLL_MS);
+      // job may have been swept/deleted while queued -- stop waiting
+      const [row] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, job.id));
+      if (!row || row.status !== "queued") return;
+      if ((await countProcessingJobs()) < maxConcurrentLocalJobs()) {
+        await this.launch(job);
+        return;
+      }
+    }
+  }
+
+  private async launch(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void> {
     const { id: jobId, source, sourceType, outDir } = job;
 
     await mkdir(outDir, { recursive: true });
