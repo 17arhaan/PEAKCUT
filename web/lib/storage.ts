@@ -1,17 +1,27 @@
-import { mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import path from "node:path";
+import { env } from "@/lib/env";
 
 /**
  * Storage seam. `storage` is the object other app code should call — a
- * `LocalStorage` today, an `R2Storage` once R2 credentials land (see
- * lib/env.ts's R2_* gated vars). `sanitizeKey`/`resolveStoragePath` are
- * exported separately because the upload/media route handlers need raw fs
- * access to actually move bytes — something a real object-storage backend
- * wouldn't expose through this interface (it'd use presigned URLs instead).
+ * `LocalStorage` in dev, an `R2Storage` when all four R2_* env vars are set
+ * (see lib/env.ts). `sanitizeKey`/`resolveStoragePath` are exported
+ * separately because the local upload/media route handlers need raw fs
+ * access to actually move bytes — R2 never proxies bytes through the app:
+ * uploads go straight to the bucket via a presigned PUT, downloads via a
+ * presigned GET.
  */
 export interface Storage {
-  putObjectUrl(key: string): Promise<{ url: string; fields?: Record<string, string> }>;
-  getUrl(key: string): string;
+  /** Where the client should send the file's bytes. `direct: true` means PUT
+   * the body straight at `url` (a presigned R2 URL); false means POST to the
+   * app's own /api/upload proxy route (local dev). */
+  putObjectUrl(key: string): Promise<{ url: string; direct: boolean }>;
+  /** A URL the browser can fetch the object from (app media route locally,
+   * time-limited presigned URL on R2 — hence async). */
+  getUrl(key: string): Promise<string>;
+  /** Server-side copy of a worker-produced local file into storage. */
+  putObjectFromFile(key: string, filePath: string): Promise<void>;
   delete(prefix: string): Promise<void>;
 }
 
@@ -86,14 +96,19 @@ export function assertOwnedKey(key: string, userId: string, root: string = STORA
 export class LocalStorage implements Storage {
   constructor(private readonly root: string = STORAGE_ROOT) {}
 
-  async putObjectUrl(key: string): Promise<{ url: string }> {
+  async putObjectUrl(key: string): Promise<{ url: string; direct: boolean }> {
     sanitizeKey(key, this.root);
-    return { url: `/api/upload?key=${encodeURIComponent(key)}` };
+    return { url: `/api/upload?key=${encodeURIComponent(key)}`, direct: false };
   }
 
-  getUrl(key: string): string {
+  async getUrl(key: string): Promise<string> {
     sanitizeKey(key, this.root);
     return `/api/media/${key.split("/").map(encodeURIComponent).join("/")}`;
+  }
+
+  async putObjectFromFile(key: string, filePath: string): Promise<void> {
+    const dest = await this.ensureParentDir(key);
+    await copyFile(filePath, dest);
   }
 
   async delete(prefix: string): Promise<void> {
@@ -113,5 +128,120 @@ export class LocalStorage implements Storage {
   }
 }
 
-// ponytail: R2Storage lands with credentials
-export const storage: Storage = new LocalStorage();
+const PRESIGN_TTL_S = 3600; // 1h: outlives any realistic upload/playback session
+
+/**
+ * Cloudflare R2 via the S3-compatible API. Keys are sanitized with the same
+ * guard as LocalStorage — an object key can't traverse anything, but every
+ * ownership check in the app reasons about the raw `u/<userId>/...` string,
+ * so a key with `..`/absolute segments must never get this far either.
+ *
+ * The SDK client is lazy: constructing it validates credentials, and this
+ * module is imported by code paths (tests, local dev) that never touch R2.
+ */
+export class R2Storage implements Storage {
+  private client: import("@aws-sdk/client-s3").S3Client | null = null;
+
+  constructor(
+    private readonly cfg: {
+      accountId: string;
+      accessKeyId: string;
+      secretAccessKey: string;
+      bucket: string;
+    },
+  ) {}
+
+  private async s3() {
+    if (!this.client) {
+      const { S3Client } = await import("@aws-sdk/client-s3");
+      this.client = new S3Client({
+        region: "auto",
+        endpoint: `https://${this.cfg.accountId}.r2.cloudflarestorage.com`,
+        credentials: {
+          accessKeyId: this.cfg.accessKeyId,
+          secretAccessKey: this.cfg.secretAccessKey,
+        },
+      });
+    }
+    return this.client;
+  }
+
+  async putObjectUrl(key: string): Promise<{ url: string; direct: boolean }> {
+    sanitizeKey(key);
+    const [{ PutObjectCommand }, { getSignedUrl }] = await Promise.all([
+      import("@aws-sdk/client-s3"),
+      import("@aws-sdk/s3-request-presigner"),
+    ]);
+    const url = await getSignedUrl(
+      await this.s3(),
+      new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key }),
+      { expiresIn: PRESIGN_TTL_S },
+    );
+    return { url, direct: true };
+  }
+
+  async getUrl(key: string): Promise<string> {
+    sanitizeKey(key);
+    const [{ GetObjectCommand }, { getSignedUrl }] = await Promise.all([
+      import("@aws-sdk/client-s3"),
+      import("@aws-sdk/s3-request-presigner"),
+    ]);
+    return getSignedUrl(
+      await this.s3(),
+      new GetObjectCommand({ Bucket: this.cfg.bucket, Key: key }),
+      { expiresIn: PRESIGN_TTL_S },
+    );
+  }
+
+  async putObjectFromFile(key: string, filePath: string): Promise<void> {
+    sanitizeKey(key);
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    await (await this.s3()).send(
+      new PutObjectCommand({
+        Bucket: this.cfg.bucket,
+        Key: key,
+        Body: createReadStream(filePath),
+      }),
+    );
+  }
+
+  async delete(prefix: string): Promise<void> {
+    sanitizeKey(prefix);
+    const { ListObjectsV2Command, DeleteObjectsCommand } = await import("@aws-sdk/client-s3");
+    const client = await this.s3();
+    // paginate: a user prefix can hold more than one LIST page of clips
+    let token: string | undefined;
+    do {
+      const listed = await client.send(
+        new ListObjectsV2Command({
+          Bucket: this.cfg.bucket,
+          Prefix: prefix.endsWith("/") ? prefix : `${prefix}/`,
+          ContinuationToken: token,
+        }),
+      );
+      const keys = (listed.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []));
+      if (keys.length > 0) {
+        await client.send(
+          new DeleteObjectsCommand({ Bucket: this.cfg.bucket, Delete: { Objects: keys } }),
+        );
+      }
+      token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (token);
+  }
+}
+
+/** All four R2 vars present -> R2; anything less -> local disk. */
+function selectStorage(): Storage {
+  const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET } = env;
+  if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET) {
+    return new R2Storage({
+      accountId: R2_ACCOUNT_ID,
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+      bucket: R2_BUCKET,
+    });
+  }
+  return new LocalStorage();
+}
+
+export const storage: Storage = selectStorage();

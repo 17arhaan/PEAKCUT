@@ -72,20 +72,21 @@ export async function getJobStatusForOwner(jobId: string, userId: string): Promi
     progress: job.progress,
     error: job.error,
     active_style: job.activeStyle,
-    clips: clipRows.map((clip) => ({
+    // getUrl is async (R2 presigning); resolve all clip URLs in parallel.
+    clips: await Promise.all(clipRows.map(async (clip) => ({
       index: clip.clipIndex,
       status: clip.status,
       score: clip.score,
       hook: clip.hook,
       dropped_reason: clip.droppedReason,
-      mp4_url: clip.status === "ready" && clip.r2Key ? storage.getUrl(clip.r2Key) : null,
-      thumb_url: clip.status === "ready" && clip.thumbKey ? storage.getUrl(clip.thumbKey) : null,
+      mp4_url: clip.status === "ready" && clip.r2Key ? await storage.getUrl(clip.r2Key) : null,
+      thumb_url: clip.status === "ready" && clip.thumbKey ? await storage.getUrl(clip.thumbKey) : null,
       // jsonb columns come back untyped from drizzle -- cast, don't
       // re-validate: W7's clipRow() already wrote these through
       // RunJsonSchema on the way in, so the shape is trusted here.
       evidence: (clip.evidence as ClipEvidence | null) ?? null,
       qa: (clip.qa as Qa | null) ?? null,
-    })),
+    }))),
     // newest last, per the wire contract — reverse the DESC/LIMIT query.
     events: eventRows
       .slice()

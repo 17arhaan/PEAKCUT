@@ -85,8 +85,10 @@ describe("LocalStorage", () => {
     await expect(storage.putObjectUrl("../evil")).rejects.toThrow();
   });
 
-  it("getUrl points at the media route with each segment encoded", () => {
-    expect(storage.getUrl("u/user1/job1/clip.mp4")).toBe("/api/media/u/user1/job1/clip.mp4");
+  it("getUrl points at the media route with each segment encoded", async () => {
+    await expect(storage.getUrl("u/user1/job1/clip.mp4")).resolves.toBe(
+      "/api/media/u/user1/job1/clip.mp4",
+    );
   });
 
   it("round-trips a file written to and read from the resolved path", async () => {

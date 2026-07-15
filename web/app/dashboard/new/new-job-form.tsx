@@ -4,7 +4,7 @@ import { useId, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Link2, Loader2, UploadCloud, X } from "lucide-react";
-import { createJob } from "@/actions/jobs";
+import { createJob, getUploadTarget } from "@/actions/jobs";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +46,7 @@ function sourceReadout(url: string, file: File | null): { label: string; meta: s
   }
 }
 
-export function NewJobForm({ userId, balance }: { userId: string; balance: number }) {
+export function NewJobForm({ balance }: { balance: number }) {
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const urlInputId = useId();
@@ -96,11 +96,10 @@ export function NewJobForm({ userId, balance }: { userId: string; balance: numbe
     try {
       let jobId: string;
       if (file) {
-        const key = `u/${userId}/${crypto.randomUUID()}/${file.name}`;
-        const uploadRes = await fetch(`/api/upload?key=${encodeURIComponent(key)}`, {
-          method: "POST",
-          body: file,
-        });
+        // Server picks the key + upload URL: /api/upload proxy (POST) locally,
+        // presigned R2 URL (PUT) in production.
+        const { key, url, direct } = await getUploadTarget(file.name);
+        const uploadRes = await fetch(url, { method: direct ? "PUT" : "POST", body: file });
         if (!uploadRes.ok) {
           throw new Error("The upload didn't make it. Check your connection and try again.");
         }

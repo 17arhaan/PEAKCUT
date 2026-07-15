@@ -44,7 +44,7 @@ export default async function NewJobPage() {
             </p>
           </div>
 
-          <NewJobForm userId={userId} balance={balance} />
+          <NewJobForm balance={balance} />
         </div>
 
         <JobPreview />

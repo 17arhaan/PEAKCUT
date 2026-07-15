@@ -5,13 +5,34 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { jobs, users } from "@/lib/db/schema";
-import { assertOwnedKey } from "@/lib/storage";
+import { assertOwnedKey, storage } from "@/lib/storage";
 import { worker, type CaptionStyle } from "@/lib/worker";
 import { debit, InsufficientCreditsError, refund } from "@/lib/credits";
 
 export interface CreateJobInput {
   source: string;
   sourceType: "url" | "upload";
+}
+
+/**
+ * Where the client should send an upload's bytes. The server builds the key
+ * (ownership by construction — u/<sessionUserId>/...) and asks the storage
+ * seam: local dev gets the /api/upload proxy route (POST), R2 gets a
+ * presigned bucket URL (PUT). Filename is sanitized down to a safe basename
+ * so a hostile name can't smuggle path segments into the key.
+ */
+export async function getUploadTarget(
+  filename: string,
+): Promise<{ key: string; url: string; direct: boolean }> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) {
+    throw new Error("unauthorized");
+  }
+  const safeName = path.basename(filename).replace(/[^\w.\-]+/g, "_").slice(-120) || "upload.mp4";
+  const key = `u/${userId}/${crypto.randomUUID()}/${safeName}`;
+  const { url, direct } = await storage.putObjectUrl(key);
+  return { key, url, direct };
 }
 
 // Work dirs live outside lib/storage's STORAGE_ROOT (they're pipeline

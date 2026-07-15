@@ -1,10 +1,10 @@
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentEvents, clips, jobs } from "@/lib/db/schema";
 import { estimatedMinutesFor, reconcile, refund } from "@/lib/credits";
-import { resolveStoragePath } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { AgentEventSchema, RunErrorSchema, RunJsonSchema, type ClipEntry } from "@/lib/types";
 
 /**
@@ -358,7 +358,7 @@ async function copyClipFiles(
 /** Best-effort cleanup of already-copied files when a later clip's copy, or the tx, fails. */
 async function cleanupCopiedKeys(copiedKeys: { mp4Key: string | null; thumbKey: string | null }[]) {
   const keys = copiedKeys.flatMap((k) => [k.mp4Key, k.thumbKey]).filter((k): k is string => k !== null);
-  await Promise.all(keys.map((key) => rm(resolveStoragePath(key), { force: true }).catch(() => {})));
+  await Promise.all(keys.map((key) => storage.delete(key).catch(() => {})));
 }
 
 function clipRow(jobId: string, clip: ClipEntry, keys: { mp4Key: string | null; thumbKey: string | null }) {
@@ -382,10 +382,9 @@ function clipRow(jobId: string, clip: ClipEntry, keys: { mp4Key: string | null; 
   };
 }
 
-/** Copies a worker-produced local file into the storage seam under `key`. */
+/** Copies a worker-produced local file into the storage seam under `key`
+ * (local disk in dev, an R2 PutObject when R2 is configured). */
 async function copyIntoStorage(sourcePath: string, key: string): Promise<string> {
-  const dest = resolveStoragePath(key);
-  await mkdir(path.dirname(dest), { recursive: true });
-  await copyFile(sourcePath, dest);
+  await storage.putObjectFromFile(key, sourcePath);
   return key;
 }
