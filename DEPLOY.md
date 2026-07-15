@@ -44,15 +44,25 @@ deterministically instead of being diffed against live tables.
 
 ## 2. Worker (Modal)
 
-The pipeline is one Modal function (`worker/src/shorts/modal_app.py`, app
-`peakcut`).
+The pipeline is one Modal app (`worker/src/shorts/modal_app.py`, app
+`peakcut`) with a `trigger` web endpoint the Next.js app calls and a
+`process_job` function that runs the pipeline, uploads clips to R2, and
+calls back to `/api/worker/callback` (progress + done/error).
 
 ```bash
 cd worker
 modal secret create anthropic ANTHROPIC_API_KEY=<key>   # once
+# once -- the web<->worker bridge secret + R2 creds the worker uploads with:
+modal secret create peakcut-web \
+  WORKER_SHARED_SECRET=$(openssl rand -hex 32) \
+  R2_ACCOUNT_ID=<id> R2_ACCESS_KEY_ID=<key> R2_SECRET_ACCESS_KEY=<secret> R2_BUCKET=peakcut
 modal deploy src/shorts/modal_app.py                    # deploy / redeploy
 modal run src/shorts/modal_app.py --source <url>        # smoke-test one run
 ```
+
+`modal deploy` prints the `trigger` endpoint URL — that's `MODAL_TRIGGER_URL`
+for the web app, and the same `WORKER_SHARED_SECRET` goes into both the Modal
+secret and the Vercel env.
 
 Live crew vs stub is controlled by `SHORTS_LLM` inside the function (see the
 header comment in `modal_app.py`). Model selection: `SHORTS_LLM_MODEL_<AGENT>`
@@ -70,8 +80,10 @@ Set env vars in the Vercel project (Production scope), then deploy. Keys mirror
 | `AUTH_SECRET` | ✅ | `openssl rand -base64 32`. |
 | `AUTH_DEV` | — | **Must be unset in prod** — `1` enables passwordless login. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | ✅ (prod auth) | Real sign-in once the dev provider is off. |
-| `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | ✅ (real jobs) | Unset → local-subprocess worker. |
-| `R2_*` | ✅ (clip storage) | Object storage for rendered clips; unset → local disk. |
+| `MODAL_TRIGGER_URL` | ✅ (real jobs) | The deployed `trigger` endpoint URL. |
+| `WORKER_SHARED_SECRET` | ✅ (real jobs) | Same value as in the `peakcut-web` Modal secret. |
+| `APP_URL` | ✅ (real jobs) | Public base URL (callback target), e.g. `https://peakcut.app`. |
+| `R2_*` (all four) | ✅ (clip storage) | Object storage for uploads + rendered clips; unset → local disk. |
 | `DODO_API_KEY` / `DODO_WEBHOOK_SECRET` | — | Billing; unset → credits are manual. |
 | `CRON_SECRET` | — | Bearer token for the stuck-job sweeper (`app/api/cron/sweep`). |
 
@@ -83,11 +95,16 @@ vercel --prod        # or push to the connected branch
 After deploy, sanity-check: sign in works, `/dashboard/new` submits a job, and
 the job reaches `render`/`done`.
 
-### Remaining swap-in tasks (code, not accounts)
-- `R2Storage` replaces `LocalStorage` (the `Storage` seam in `web/lib`).
-- `ModalWorker` replaces `LocalWorker` (the `Worker` seam in `web/lib/worker.ts`).
-- Neon driver (`drizzle-orm/neon-http`) replaces node-postgres in
-  `web/lib/db/index.ts` (marked with a `ponytail:` comment).
+### Swap-ins (already coded, env-gated — nothing to write on launch day)
+- `R2Storage` activates when all four `R2_*` vars are set (uploads become
+  presigned PUTs straight to the bucket — set a CORS rule on the bucket
+  allowing `PUT` from the app origin).
+- `ModalWorker` activates when `MODAL_TRIGGER_URL` + `WORKER_SHARED_SECRET`
+  + `APP_URL` are set.
+- No Neon driver swap needed: Vercel functions run full Node.js (Fluid
+  compute), so the existing `pg` Pool works against Neon's pooled connection
+  string directly — and keeps real transactions, which the HTTP driver
+  doesn't support.
 
 ## Phases
 

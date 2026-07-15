@@ -24,9 +24,13 @@ import { AgentEventSchema, RunErrorSchema, RunJsonSchema, type ClipEntry } from 
  * a rejected promise and clobbers this function's specific error message
  * with its own generic stderr-tail fallback.
  */
-export async function importRun(jobId: string, outDir: string): Promise<void> {
+export async function importRun(
+  jobId: string,
+  outDir: string,
+  opts: ImportOptions = {},
+): Promise<void> {
   try {
-    await doImport(jobId, outDir);
+    await doImport(jobId, outDir, opts);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db
@@ -54,8 +58,21 @@ export async function importRun(jobId: string, outDir: string): Promise<void> {
   }
 }
 
-async function doImport(jobId: string, outDir: string): Promise<void> {
-  const raw = await readFile(path.join(outDir, "run.json"), "utf8");
+export interface ImportOptions {
+  /** The worker already uploaded every clip's media to storage under the
+   * conventional keys (u/<userId>/<jobId>/clip_<n>.mp4) -- ModalWorker's
+   * callback path. Skip the local-file copy AND the cleanup-on-failure
+   * (deleting a remote worker's uploads on a tx hiccup would destroy user
+   * output that a retried import could still use). */
+  preuploaded?: boolean;
+  /** In-memory artifacts (the Modal callback's request body) -- when set,
+   * nothing is read from `outDir` at all, which also keeps this path off the
+   * filesystem entirely on serverless. */
+  content?: { runJson: string; agentEventsJsonl?: string };
+}
+
+async function doImport(jobId: string, outDir: string, opts: ImportOptions = {}): Promise<void> {
+  const raw = opts.content ? opts.content.runJson : await readFile(path.join(outDir, "run.json"), "utf8");
 
   let parsed: unknown;
   try {
@@ -92,7 +109,9 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
   }
   const userId = jobRow.userId;
 
-  const agentEventLines = await readAgentEvents(outDir);
+  const agentEventLines = opts.content
+    ? parseAgentEventLines(opts.content.agentEventsJsonl ?? "")
+    : await readAgentEvents(outDir);
 
   // cost_cents <- sum(agent_totals.*.cost_cents). agent_totals only ever
   // carries LLM-agent entries (scout/critic/orchestrator/surgeon/hooks/qa
@@ -112,13 +131,24 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
   // source file aborts the whole import before any DB row is written --
   // no tx to roll back, no partial clip rows.
   const copiedKeys: { mp4Key: string | null; thumbKey: string | null }[] = [];
-  try {
+  if (opts.preuploaded) {
+    // Media already in storage under the conventional keys (uploaded by the
+    // remote worker before it called back) -- just derive them.
     for (const clip of run.clips) {
-      copiedKeys.push(await copyClipFiles(userId, jobId, clip));
+      copiedKeys.push({
+        mp4Key: clip.paths.mp4 ? `u/${userId}/${jobId}/clip_${clip.index}.mp4` : null,
+        thumbKey: clip.paths.thumb ? `u/${userId}/${jobId}/clip_${clip.index}_thumb.jpg` : null,
+      });
     }
-  } catch (err) {
-    await cleanupCopiedKeys(copiedKeys);
-    throw err;
+  } else {
+    try {
+      for (const clip of run.clips) {
+        copiedKeys.push(await copyClipFiles(userId, jobId, clip));
+      }
+    } catch (err) {
+      await cleanupCopiedKeys(copiedKeys);
+      throw err;
+    }
   }
 
   try {
@@ -165,8 +195,11 @@ async function doImport(jobId: string, outDir: string): Promise<void> {
     });
   } catch (err) {
     // tx rolled back its own DB writes; the already-copied files are not
-    // part of that transaction, so clean them up ourselves.
-    await cleanupCopiedKeys(copiedKeys);
+    // part of that transaction, so clean them up ourselves (never for
+    // preuploaded media -- see ImportOptions).
+    if (!opts.preuploaded) {
+      await cleanupCopiedKeys(copiedKeys);
+    }
     throw err;
   }
 
@@ -326,6 +359,11 @@ async function copyStyleClipFiles(
   return { mp4Key, thumbKey };
 }
 
+function parseAgentEventLines(raw: string) {
+  const lines = raw.split("\n").filter((l) => l.trim() !== "");
+  return lines.map((line) => AgentEventSchema.parse(JSON.parse(line)));
+}
+
 async function readAgentEvents(outDir: string) {
   let raw: string;
   try {
@@ -333,8 +371,7 @@ async function readAgentEvents(outDir: string) {
   } catch {
     return []; // not every run produces one (e.g. a zero-clip run)
   }
-  const lines = raw.split("\n").filter((l) => l.trim() !== "");
-  return lines.map((line) => AgentEventSchema.parse(JSON.parse(line)));
+  return parseAgentEventLines(raw);
 }
 
 /** Copies a clip's render + thumb into storage. Called before the DB tx opens (see doImport). */

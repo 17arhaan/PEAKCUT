@@ -36,6 +36,17 @@ const envSchema = z.object({
   // Worker seam: LocalWorker -> ModalWorker swap-in.
   MODAL_TOKEN_ID: optionalGated("MODAL_TOKEN_ID", "worker seam: ModalWorker swap-in"),
   MODAL_TOKEN_SECRET: optionalGated("MODAL_TOKEN_SECRET", "worker seam: ModalWorker swap-in"),
+  // The deployed Modal trigger endpoint URL (modal_app.py's `trigger`
+  // fastapi_endpoint). Set together with WORKER_SHARED_SECRET to swap in
+  // ModalWorker; either missing keeps LocalWorker.
+  MODAL_TRIGGER_URL: optionalGated("MODAL_TRIGGER_URL", "worker seam: ModalWorker swap-in"),
+  // Shared secret for BOTH directions of the web<->Modal bridge: sent as a
+  // bearer token on the trigger call, and required back on
+  // /api/worker/callback. Fail-closed: unset means the callback route 401s.
+  WORKER_SHARED_SECRET: optionalGated("WORKER_SHARED_SECRET", "worker seam: Modal trigger/callback auth"),
+  // Public base URL of this app (e.g. https://peakcut.app) -- Modal needs an
+  // absolute callback URL.
+  APP_URL: optionalGated("APP_URL", "worker seam: absolute callback URL for Modal"),
 
   // Google OAuth, alongside the always-on dev credentials provider.
   GOOGLE_CLIENT_ID: optionalGated("GOOGLE_CLIENT_ID", "Google OAuth sign-in"),

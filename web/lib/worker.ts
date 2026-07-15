@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
+import { env } from "@/lib/env";
 import { estimatedMinutesFor, refund } from "@/lib/credits";
 import { importRun, importStyleRun } from "@/lib/run-import";
 import { resolveStoragePath } from "@/lib/storage";
@@ -74,7 +75,7 @@ const STAGE_ORDER: Stage[] = ["ingest", "signals", "crew", "render"];
 // stage, i.e. render). "ingest"/"signals" aren't emitted as agent names
 // today (those stages don't call AgentLog) but are mapped defensively in
 // case that changes.
-const AGENT_STAGE: Record<string, Stage> = {
+export const AGENT_STAGE: Record<string, Stage> = {
   ingest: "ingest",
   signals: "signals",
   scout: "crew",
@@ -95,14 +96,14 @@ function progressForStage(stage: Stage): number {
   return sum;
 }
 
-async function setJobStage(jobId: string, stage: Stage): Promise<void> {
+export async function setJobStage(jobId: string, stage: Stage): Promise<void> {
   await db
     .update(jobs)
     .set({ stage, progress: progressForStage(stage), updatedAt: new Date() })
     .where(eq(jobs.id, jobId));
 }
 
-async function markFailed(jobId: string, error: string): Promise<void> {
+export async function markFailed(jobId: string, error: string): Promise<void> {
   await db
     .update(jobs)
     .set({ status: "failed", error: error.slice(0, 2000), updatedAt: new Date() })
@@ -210,7 +211,7 @@ export function resolveWorkerSource(source: string, sourceType: "url" | "upload"
  * child process handler with nothing to propagate a rejection to, so a
  * refund failure is logged, not thrown.
  */
-async function refundOnCrash(jobId: string): Promise<void> {
+export async function refundOnCrash(jobId: string): Promise<void> {
   try {
     const [jobRow] = await db.select({ userId: jobs.userId }).from(jobs).where(eq(jobs.id, jobId));
     if (!jobRow) return;
@@ -462,4 +463,71 @@ class StubWorker implements Worker {
   async renderStyle(): Promise<void> {}
 }
 
-export const worker: Worker = process.env.STUB_WORKER === "1" ? new StubWorker() : new LocalWorker();
+/**
+ * Dispatches jobs to the deployed Modal pipeline (modal_app.py's `trigger`
+ * fastapi_endpoint) instead of spawning a local subprocess. The remote
+ * worker uploads finished clips straight to R2 under the conventional keys
+ * and POSTs progress + completion back to /api/worker/callback (which runs
+ * importRun with `preuploaded: true`). Auth both ways is WORKER_SHARED_SECRET.
+ */
+export class ModalWorker implements Worker {
+  constructor(
+    private readonly cfg: { triggerUrl: string; secret: string; appUrl: string },
+  ) {}
+
+  async start(job: { id: string; source: string; sourceType: "url" | "upload"; outDir: string }): Promise<void> {
+    const { id: jobId, source, sourceType } = job;
+    const [jobRow] = await db.select({ userId: jobs.userId }).from(jobs).where(eq(jobs.id, jobId));
+    if (!jobRow) throw new Error(`job ${jobId} not found`);
+
+    await db
+      .update(jobs)
+      .set({ status: "processing", stage: "ingest", progress: 0, updatedAt: new Date() })
+      .where(eq(jobs.id, jobId));
+
+    try {
+      const res = await fetch(this.cfg.triggerUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.cfg.secret}`,
+        },
+        body: JSON.stringify({
+          job_id: jobId,
+          user_id: jobRow.userId,
+          source,
+          source_type: sourceType,
+          callback_url: `${this.cfg.appUrl.replace(/\/$/, "")}/api/worker/callback`,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`Modal trigger responded ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      }
+    } catch (err) {
+      await markFailed(jobId, err instanceof Error ? err.message : String(err));
+      await refundOnCrash(jobId);
+    }
+  }
+
+  // ponytail: restyle needs the run's workdir, which lives on the Modal
+  // Volume, not here -- wire a second endpoint against that Volume when
+  // restyle-on-Modal matters. The action surfaces this message to the UI.
+  async renderStyle(): Promise<void> {
+    throw new Error("Caption restyle isn't available on cloud processing yet.");
+  }
+}
+
+function selectWorker(): Worker {
+  if (process.env.STUB_WORKER === "1") return new StubWorker();
+  const { MODAL_TRIGGER_URL, WORKER_SHARED_SECRET, APP_URL } = env;
+  if (MODAL_TRIGGER_URL && WORKER_SHARED_SECRET && APP_URL) {
+    return new ModalWorker({
+      triggerUrl: MODAL_TRIGGER_URL,
+      secret: WORKER_SHARED_SECRET,
+      appUrl: APP_URL,
+    });
+  }
+  return new LocalWorker();
+}
+
+export const worker: Worker = selectWorker();

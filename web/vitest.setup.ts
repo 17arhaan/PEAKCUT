@@ -13,6 +13,9 @@ process.env.CRON_SECRET ??= "test-cron-secret";
 // Parallel test files share one DB; LocalWorker's global processing-count
 // gate (lib/worker.ts) would queue spawns nondeterministically at 1.
 process.env.LOCAL_WORKER_CONCURRENCY ??= "1000";
+// Auth for /api/worker/callback tests. MODAL_TRIGGER_URL stays unset, so
+// worker selection still picks LocalWorker everywhere else.
+process.env.WORKER_SHARED_SECRET ??= "test-worker-secret";
 
 // Ensure test DB exists and schema is deployed (fallback for existing containers).
 // ponytail: one-shot create-and-push; idempotent so safe to run per test suite
