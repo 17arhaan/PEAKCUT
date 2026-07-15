@@ -377,3 +377,29 @@ def test_refine_clamps_duration_to_media_bounds(tmp_path):
     cut = refine(cand, idx, _log(tmp_path))
     assert cut.t1 <= idx.media.duration_s
     assert cut.t0 >= 0.0
+
+
+def test_duration_floor_widening_reopens_on_a_word_start(tmp_path):
+    """The _MIN_DUR_S floor widens a too-short cut by arithmetic
+    (t0 = t1 - 30); the reopened t0 must land on a word start / silence edge,
+    not mid-word (the exact CI failure: t0=60.0 on a 90s source with no word
+    boundary there)."""
+    # words every 0.7s from 55s to 90s; none starts at exactly 60.0
+    words = [
+        Word(text=f"w{i}", t0=55.3 + i * 0.7, t1=55.3 + i * 0.7 + 0.5, conf=0.9)
+        for i in range(50)
+    ]
+    idx = _mk_index(
+        media=MediaInfo(duration_s=90.0, fps=30.0, width=1920, height=1080),
+        words=[w for w in words if w.t1 <= 90.0],
+    )
+    # candidate snaps inside [85, 90) -> ~5s long -> floor widens toward t1-30
+    cand = Candidate(t0=85.0, t1=89.9, source="rule", evidence=[])
+
+    cut = refine(cand, idx, _log(tmp_path))
+
+    assert cut.t1 - cut.t0 >= 30.0 - 1e-6
+    word_starts = [w.t0 for w in idx.words]
+    assert any(abs(cut.t0 - t) <= _TOL for t in word_starts), (
+        f"t0={cut.t0} is arithmetic, not a word start"
+    )

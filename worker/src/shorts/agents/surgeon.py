@@ -254,6 +254,24 @@ def _clamp_duration(t0: float, t1: float, duration: float) -> tuple[float, float
     return t0, t1
 
 
+def _resnap_widened_t0(t0: float, t1: float, idx: SignalIndex) -> float:
+    """The duration floor in _clamp_duration widens a too-short cut by moving
+    t0 to bare arithmetic (t1 - _MIN_DUR_S), which can land mid-word -- the
+    clip then opens mid-syllable. Pull t0 back to the nearest EARLIER silence
+    edge or word start (never later, so the floor stays satisfied) that still
+    respects the max duration. At the very edge of the media there may be no
+    such edge -- then the arithmetic bound stands (the documented exception)."""
+    floor = max(0.0, t1 - _MAX_DUR_S)
+    best: float | None = None
+    for edge in (s.t1 for s in idx.silences):
+        if floor <= edge <= t0 and (best is None or edge > best):
+            best = edge
+    for edge in (w.t0 for w in idx.words):
+        if floor <= edge <= t0 and (best is None or edge > best):
+            best = edge
+    return t0 if best is None else best
+
+
 def refine(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Cut:
     """Deterministically refine `cand`'s raw window into a Cut whose
     boundaries sit on speech edges: t0 snaps to a preceding silence (or,
@@ -266,7 +284,11 @@ def refine(cand: Candidate, idx: SignalIndex, log: AgentLog) -> Cut:
     t0 = _strip_leading_fillers(t0, idx)
     t1 = _snap_t1(cand, idx)
 
+    snapped_t0 = t0
     t0, t1 = _clamp_duration(t0, t1, idx.media.duration_s)
+    if t0 < snapped_t0:
+        # the duration floor widened the open -- put it back on speech
+        t0 = _resnap_widened_t0(t0, t1, idx)
 
     payoff_word_i = _payoff_word_i(cand, idx)
 
@@ -358,6 +380,9 @@ def repair(cut: Cut, idx: SignalIndex, failures: list[QAFail], log: AgentLog) ->
         new_cut = _repair_align(new_cut, idx)
 
     t0, t1 = _clamp_duration(new_cut.t0, new_cut.t1, idx.media.duration_s)
+    if t0 < new_cut.t0:
+        # same widening artifact as refine(): re-open on speech, not arithmetic
+        t0 = _resnap_widened_t0(t0, t1, idx)
     log.emit(
         "surgeon", "repaired",
         {"codes": sorted(codes), "orig_t0": cut.t0, "orig_t1": cut.t1, "t0": t0, "t1": t1},
